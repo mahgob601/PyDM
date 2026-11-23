@@ -306,6 +306,17 @@ def run(d, finalize_container=True):
     return join(d, work, use_ffmpeg_crypto, finalize_container)
 
 
+def _ff_name(work, i, ext):
+    src, name = os.path.join(work, f"{i:06d}.seg"), f"{i:06d}{ext}"
+    dst = os.path.join(work, name)
+    if not os.path.exists(dst):
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copyfile(src, dst)
+    return name
+
+
 def join(d, work, use_ffmpeg_crypto, finalize_container):
     st = d.hls
     segs = st["segments"]
@@ -313,6 +324,9 @@ def join(d, work, use_ffmpeg_crypto, finalize_container):
     ff = media.ffmpeg_path(d._settings())
     if use_ffmpeg_crypto:
         local = os.path.join(work, "local.m3u8")
+        # ffmpeg >= 7 refuses HLS segments whose extension it doesn't know (".seg"), so the
+        # playlist points at hard links with standard names; no data is copied.
+        seg_ext = ".m4s" if st.get("map") else ".ts"
         with open(local, "w", encoding="utf-8") as f:
             f.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:30\n")
             if st.get("map"):
@@ -332,7 +346,7 @@ def join(d, work, use_ffmpeg_crypto, finalize_container):
                         f.write(f'#EXT-X-KEY:METHOD=AES-128,URI="key{s[3]}.bin"{ivs}\n')
                         last = s[3]
                     f.write(f"#EXT-X-MEDIA-SEQUENCE:{s[4]}\n" if i == 0 else "")
-                    f.write(f"#EXTINF:1.0,\n{i:06d}.seg\n")
+                    f.write(f"#EXTINF:1.0,\n{_ff_name(work, i, seg_ext)}\n")
             finally:
                 conn.close()
             f.write("#EXT-X-ENDLIST\n")

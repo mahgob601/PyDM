@@ -34,7 +34,7 @@ import uuid
 
 from . import checksums, ftp, media, postprocess, security
 from .bandwidth import Governor
-from .util import (APP_DIR, DEFAULT_UA, SETTINGS_FILE, STATE_FILE, TEMP_SUFFIX, category_for,
+from .util import (APP_DIR, DEFAULT_UA, content_disposition_filename, SETTINGS_FILE, STATE_FILE, TEMP_SUFFIX, category_for,
                    describe_error, ext_of, filename_from_url, is_inside, safe_filename,
                    unique_path)
 
@@ -137,8 +137,22 @@ def disk_full(e):
     return getattr(e, "errno", None) == 28 or getattr(e, "winerror", None) in (39, 112)
 
 
+def describe_local_error(e):
+    win = getattr(e, "winerror", None)
+    if win in (225, 226) or (os.name == "nt" and e.errno == 22):
+        # ERROR_VIRUS_INFECTED / ERROR_VIRUS_DELETED; Defender's real-time block shows up as
+        # EINVAL when it yanks the file away mid-write.
+        return ("Blocked by your antivirus (Windows Security) — the file was flagged as "
+                "dangerous and removed")
+    if e.errno in (13, 1) or win == 5:
+        return "Can't write to the download folder (access denied) — choose another folder"
+    if e.errno == 30:
+        return "The download folder is read-only — choose another folder"
+    return f"Couldn't write the file: {e.strerror or e}"
+
+
 def is_transient(e):
-    if isinstance(e, BlockedError) or disk_full(e):
+    if isinstance(e, (BlockedError, LocalFileError)) or disk_full(e):
         return False
     code = getattr(e, "code", None)
     if isinstance(code, int):
@@ -246,7 +260,7 @@ def probe_url(url, headers, opener, timeout=30):
     else:
         cl = (h.get("Content-Length") or "").strip()
         total = int(cl) if cl.isdigit() else None
-    raw = h.get_filename() or filename_from_url(final) or filename_from_url(url)
+    raw = content_disposition_filename(h.get("Content-Disposition")) or filename_from_url(final) or filename_from_url(url)
     name = safe_filename(raw)
     if not os.path.splitext(name)[1]:
         ext = mimetypes.guess_extension(h.get_content_type() or "")
@@ -356,31 +370,66 @@ class HttpConn:
         raise IOError("Too many redirects")
 
 
+class LocalFileError(OSError):
+    """Writing to the user's disk failed (not the network): antivirus, permissions, disk."""
+
+
+def local_file_error(e):
+    err = LocalFileError(e.errno, e.strerror, getattr(e, "filename", None))
+    err.winerror = getattr(e, "winerror", None)
+    return err
+
+
 class FileWriter:
-    """Positional writes from many threads into one pre-allocated file."""
+    """Positional writes from many threads into one pre-allocated file.
+
+    POSIX uses pwrite on one descriptor. Windows has no pwrite in Python, so each worker
+    thread gets its own descriptor (own file position): no shared seek+write lock."""
 
     def __init__(self, path):
-        self.fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+        self.path = path
         self.positional = hasattr(os, "pwrite")
         self.lock = threading.Lock()
+        self._local = threading.local()
+        self._fds = []
+        self.fd = self._open()
+
+    def _open(self):
+        try:
+            fd = os.open(self.path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+        except OSError as e:
+            raise local_file_error(e) from e
+        with self.lock:
+            self._fds.append(fd)
+        return fd
 
     def write(self, offset, mv):
-        if self.positional:
-            while mv:
-                n = os.pwrite(self.fd, mv, offset)
-                mv, offset = mv[n:], offset + n
-        else:
-            with self.lock:
-                os.lseek(self.fd, offset, os.SEEK_SET)
+        try:
+            if self.positional:
                 while mv:
-                    n = os.write(self.fd, mv)
-                    mv = mv[n:]
+                    n = os.pwrite(self.fd, mv, offset)
+                    mv, offset = mv[n:], offset + n
+                return
+            fd = getattr(self._local, "fd", None)
+            if fd is None:
+                fd = self._local.fd = self._open()
+            os.lseek(fd, offset, os.SEEK_SET)
+            while mv:
+                n = os.write(fd, mv)
+                mv = mv[n:]
+        except LocalFileError:
+            raise
+        except OSError as e:
+            raise local_file_error(e) from e
 
     def close(self):
-        try:
-            os.close(self.fd)
-        except OSError:
-            pass
+        with self.lock:
+            fds, self._fds = self._fds, []
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def make_sparse(path):
@@ -738,11 +787,16 @@ class Download:
         if not is_inside(path, self.save_dir):
             raise BlockedError("Blocked: the file name tried to escape the download folder")
         self.path, self.filename = path, os.path.basename(path)
-        open(self.temp_path, "wb").close()
-        if self.total:
-            make_sparse(self.temp_path)
-            with open(self.temp_path, "r+b") as f:
-                f.truncate(self.total)
+        try:
+            open(self.temp_path, "wb").close()
+            if self.total:
+                make_sparse(self.temp_path)
+                with open(self.temp_path, "r+b") as f:
+                    f.truncate(self.total)
+        except OSError as e:
+            if disk_full(e):
+                raise
+            raise local_file_error(e) from e
         if self.total == 0:
             segs = []
         elif self.resumable and self.sequential:
@@ -837,6 +891,7 @@ class Download:
         except Exception as e:  # noqa: BLE001
             self.status = "Error"
             self.error = ("Disk is full — free some space, then resume" if disk_full(e)
+                          else describe_local_error(e) if isinstance(e, LocalFileError)
                           else (str(e) if isinstance(e, (IncompleteError, media.MediaError))
                                 else describe_error(e)))
             self.err_transient = is_transient(e)
@@ -1064,7 +1119,10 @@ class Download:
             final = self.path
             if os.path.exists(final):
                 final = unique_path(final)
-            os.replace(self.temp_path, final)
+            try:
+                os.replace(self.temp_path, final)
+            except OSError as e:
+                raise local_file_error(e) from e
             self.path, self.filename = final, os.path.basename(final)
         if self.total is None:
             self.total = os.path.getsize(final)
@@ -1460,6 +1518,9 @@ class Download:
             return "abort"
         if isinstance(e, BlockedError):
             self._abort = str(e)
+            return "abort"
+        if isinstance(e, LocalFileError):           # our disk, not the network: don't redial
+            self._abort = describe_local_error(e)
             return "abort"
         if code in (429, 503):
             self._throttled(w)

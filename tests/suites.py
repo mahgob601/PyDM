@@ -54,6 +54,12 @@ def suite_core(t):
     t.check("double extension flagged", lvl["double"] == "danger")
     t.check("404 gives a clear error, no retry", ds["404"].status == "Error" and not
             ds["404"].retry_at, ds["404"].error)
+    from pydm.core.util import content_disposition_filename as cdf
+    t.check("Content-Disposition: filename* (UTF-8) wins over ASCII fallback",
+            cdf("attachment; filename=\"download\"; filename*=UTF-8''%D8%AA%D9%82.pdf")
+            == "\u062a\u0642.pdf" and cdf('attachment; filename="a \\"q\\".zip"') == 'a "q".zip'
+            and cdf("attachment; filename*=iso-8859-1'en'%A3.pdf") == "\u00a3.pdf"
+            and cdf("attachment") is None)
     t.check("batch pattern expansion", expand_pattern("http://x/img[08-11].jpg")[-1] ==
             "http://x/img11.jpg" and len(expand_pattern("http://x/[a-c]/f[1-3]")) == 9)
     t.check("right-to-left trick removed and flagged",
@@ -437,7 +443,7 @@ def suite_media(t):
 # --------------------------------------------------------------------------- speed
 def suite_speed(t):
     def run(label, url, limit, **kw):
-        m = t.manager("speed_" + label)
+        m = t.manager("speed_" + label, antivirus_scan=False)
         d = m.add(url, **kw)
         t0 = time.time()
         t.wait(m, d, 300)
@@ -454,6 +460,30 @@ def suite_speed(t):
     run("two mirrors", t.url("mirror1") + "f100.bin", 9, mirrors=[t.url("mirror2") + "f100.bin"])
     run("raw local (disk + engine)", t.url("raw") + "f400.bin", 80, connections=8,
         auto_tune=False)
+    # Baseline without the engine: 8 threads reading the same file into memory and dropping it.
+    # If this is slow too, the bench server (not PyDM) is the limit on this machine.
+    import concurrent.futures
+    import urllib.request
+    size = os.path.getsize(t.p("srv/f400.bin"))
+    part = size // 8
+
+    def pull(i):
+        req = urllib.request.Request(t.url("raw") + "f400.bin", headers={
+            "Range": f"bytes={i * part}-{size - 1 if i == 7 else (i + 1) * part - 1}"})
+        n = 0
+        with urllib.request.urlopen(req, timeout=60) as r:
+            while True:
+                b = r.read(1 << 20)
+                if not b:
+                    return n
+                n += len(b)
+    t0 = time.time()
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        got = sum(ex.map(pull, range(8)))
+    base = got / (time.time() - t0) / 2**20
+    t.metrics["bench server alone, 8 readers, no disk"] = round(base, 1)
+    t.note("speed baseline", f"bench server alone: {base:.1f} MB/s; PyDM raw local: "
+                             f"{t.metrics.get('raw local (disk + engine)')} MB/s")
 
 
 # --------------------------------------------------------------------------- Windows only
@@ -488,6 +518,9 @@ def suite_windows(t):
     t.check("EICAR test virus caught (scan or real-time protection)",
             caught or (e.status == "Error"), f"{e.status} · {e.error or sec.get('level')} · "
             f"file exists: {bool(e.path and os.path.exists(e.path))}")
+    if e.status == "Error":
+        t.check("blocked virus: clear antivirus message, never auto-retried",
+                "antivirus" in (e.error or "").lower() and not e.retry_at, e.error)
     t.note("EICAR outcome", f"status={e.status}, error={e.error!r}, "
                             f"findings={[f['text'] for f in sec.get('findings', [])]}")
     # sparse pre-allocation

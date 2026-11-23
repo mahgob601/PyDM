@@ -79,6 +79,47 @@ def safe_filename(name):
     return name or "download"
 
 
+_CD_PARAM = re.compile(r""";\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+\*?)\s*=\s*("(?:[^"\\]|\\.)*"|[^;]*)""")
+
+
+def content_disposition_filename(header):
+    """File name from a Content-Disposition header (RFC 6266).
+
+    `filename*=UTF-8''...` (RFC 5987) wins over the plain `filename=` that servers send as an
+    ASCII fallback. Python's email parser returns whichever comes first, which turns
+    "تقرير.pdf" into "download"."""
+    if not header:
+        return None
+    params = {}
+    for key, val in _CD_PARAM.findall(";" + header.split(";", 1)[-1] if ";" in header else ""):
+        key, val = key.lower(), val.strip()
+        if val.startswith('"') and val.endswith('"') and len(val) >= 2:
+            val = re.sub(r"\\(.)", r"\1", val[1:-1])
+        params.setdefault(key, val)
+    ext = params.get("filename*")
+    if ext:
+        m = re.match(r"([A-Za-z0-9!#$%&+^_`{}~-]*)'[^']*'(.*)$", ext)
+        if m:
+            charset = m.group(1) or "utf-8"
+            try:
+                name = urllib.parse.unquote(m.group(2), encoding=charset, errors="strict")
+            except (LookupError, UnicodeDecodeError):
+                name = urllib.parse.unquote(m.group(2), encoding="latin-1")
+            if name.strip():
+                return name
+    name = params.get("filename")
+    if name:
+        if "%" in name:  # common non-standard habit: percent-encoded UTF-8 in filename=
+            try:
+                dec = urllib.parse.unquote(name, errors="strict")
+                if dec != name:
+                    name = dec
+            except UnicodeDecodeError:
+                pass
+        return name.strip() or None
+    return None
+
+
 def filename_from_url(url):
     path = urllib.parse.urlsplit(url).path
     return urllib.parse.unquote(os.path.basename(path.rstrip("/")))
