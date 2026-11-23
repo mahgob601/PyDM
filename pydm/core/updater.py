@@ -25,7 +25,10 @@ class UpdateError(Exception):
 
 
 def parse_version(v):
-    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:4]) or (0,)
+    parts = [int(x) for x in re.findall(r"\d+", str(v))[:4]]
+    while len(parts) > 1 and parts[-1] == 0:      # "4.1" == "4.1.0": never an update loop
+        parts.pop()
+    return tuple(parts) or (0,)
 
 
 def verify_signature(public_key_b64, payload, signature_b64):
@@ -51,6 +54,31 @@ def _get(url, opener, limit=256 * 1024):
     if len(data) > limit:
         raise UpdateError("Update manifest is too large")
     return data
+
+
+def launch_installer(path, wait_pid=None):
+    """Run a verified PyDM installer as an in-place upgrade once this process has exited.
+
+    The caller quits right after this returns. A hidden PowerShell waits for our PID to be gone
+    (a silent install refuses to run while PyDM holds its mutex), then runs setup /SILENT; the
+    installer starts PyDM again when it's done."""
+    import os
+    import subprocess
+    import sys
+    if not sys.platform.startswith("win"):
+        raise UpdateError("Automatic install is only available on Windows")
+    if not os.path.isfile(path):
+        raise UpdateError("Installer not found")
+    pid = int(wait_pid or os.getpid())
+    q = path.replace("'", "''")
+    script = (f"Wait-Process -Id {pid} -Timeout 120 -ErrorAction SilentlyContinue; "
+              f"Start-Process -FilePath '{q}' -ArgumentList "
+              "'/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS'")
+    flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0) |
+             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                      "Bypass", "-WindowStyle", "Hidden", "-Command", script],
+                     creationflags=flags, close_fds=True)
 
 
 def check(update_url, public_key, opener=None, current=VERSION):

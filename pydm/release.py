@@ -1,7 +1,9 @@
-"""Release configuration — fill these in when you publish signed builds.
+"""Release configuration for official builds.
 
-UPDATE_URL  : HTTPS address of manifest.json (manifest.json.sig must sit next to it)
-PUBLIC_KEY  : base64 Ed25519 public key printed by `python tools/sign_release.py keygen`
+UPDATE_URL  : signed manifest of the newest GitHub release (latest.json.sig sits next to it).
+              GitHub's /releases/latest/download/ always points at the newest release.
+PUBLIC_KEY  : Ed25519 public key. The matching private key signs every release (GitHub secret
+              RELEASE_SIGNING_KEY); a manifest it didn't sign is refused.
 """
-UPDATE_URL = ""
-PUBLIC_KEY = ""
+UPDATE_URL = "https://github.com/mahgob601/PyDM/releases/latest/download/latest.json"
+PUBLIC_KEY = "4U69klyZF8bQvEiP0iDAAbyzQWCUFyRA15xwgWzq7kQ="

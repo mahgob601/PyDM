@@ -117,11 +117,16 @@ def run_gui(start_hidden=False):
     app.setStyleSheet(QSS)
 
     os.makedirs(APP_DIR, exist_ok=True)
+    if sys.platform.startswith("win"):
+        # Lets the installer/updater see that PyDM is running (Inno Setup AppMutex).
+        import ctypes
+        app._mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "PyDM.AppMutex")
     lock = QLockFile(os.path.join(APP_DIR, "pydm.lock"))
     lock.setStaleLockTime(0)
     if not lock.tryLock(100):
-        QMessageBox.information(None, APP_NAME, "PyDM is already running — look for its icon "
-                                                "in the system tray.")
+        if not start_hidden:                     # sign-in autostart: just step aside quietly
+            QMessageBox.information(None, APP_NAME, "PyDM is already running — look for its "
+                                                    "icon in the system tray.")
         return 0
 
     manager = Manager()

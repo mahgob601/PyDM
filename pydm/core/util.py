@@ -9,7 +9,7 @@ import urllib.parse
 import socket
 
 APP_NAME = "PyDM"
-VERSION = "4.0"
+VERSION = "4.1"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".pydm")
 STATE_FILE = os.path.join(APP_DIR, "downloads.json")
 SETTINGS_FILE = os.path.join(APP_DIR, "settings.json")

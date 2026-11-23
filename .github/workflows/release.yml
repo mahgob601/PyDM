@@ -1,0 +1,80 @@
+name: release
+# Push a tag that matches pydm/core/util.py VERSION (e.g. v4.1) to build, test, sign and publish.
+# Run it by hand ("Run workflow") for a dry run: build + installer smoke test, no release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag matches the app version
+        id: ver
+        run: |
+          $v = python -c "from pydm.core.util import VERSION; print(VERSION)"
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "v$v" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} doesn't match VERSION $v in pydm/core/util.py"
+          }
+
+      - name: Build PyDM.exe + installer
+        run: ./tools/build_windows.ps1
+
+      - name: Installer smoke test (install, run, self-update, uninstall)
+        run: ./tools/smoke_installer.ps1
+
+      - name: Sign the update manifest
+        if: github.ref_type == 'tag'
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if (-not $env:SIGNING_KEY) { throw "RELEASE_SIGNING_KEY secret is not set" }
+          $v = "${{ steps.ver.outputs.version }}"
+          $key = Join-Path $env:RUNNER_TEMP "release_key.pem"
+          [IO.File]::WriteAllText($key, $env:SIGNING_KEY)
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$v/PyDM-Setup-$v.exe"
+          python tools/sign_release.py sign "build/installer/PyDM-Setup-$v.exe" $v $url `
+            "PyDM $v - see the release page for what's new." --key $key --out build/installer/latest.json
+          Remove-Item $key -Force
+          # The app only trusts pydm/release.py's PUBLIC_KEY: refuse to publish anything else.
+          python -c "import sys; sys.path.insert(0, '.'); from pydm import release; from pydm.core.updater import verify_signature as v; d = open('build/installer/latest.json', 'rb').read(); s = open('build/installer/latest.json.sig').read(); sys.exit(0 if v(release.PUBLIC_KEY, d, s) else 'signature does not match pydm/release.py PUBLIC_KEY')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PyDM-${{ steps.ver.outputs.version }}-windows
+          path: build/installer/
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          gh release create "v$v" "build/installer/PyDM-Setup-$v.exe" build/installer/latest.json `
+            build/installer/latest.json.sig --title "PyDM $v" --generate-notes --latest
+
+      - name: Live check - what installed copies will see
+        if: github.ref_type == 'tag' && !github.event.repository.private
+        run: |
+          Start-Sleep 10
+          python -c "import sys; sys.path.insert(0, '.'); from pydm import release; from pydm.core import updater; m = updater.check(release.UPDATE_URL, release.PUBLIC_KEY, current='0'); print(m); assert m['version'] == '${{ steps.ver.outputs.version }}'"

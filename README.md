@@ -1,4 +1,4 @@
-# PyDM 4 — high-speed, secure download manager
+# PyDM 4.1 — high-speed, secure download manager
 
 A download manager in the spirit of Internet Download Manager. It's built for raw speed and adds what IDM lacks:
 
@@ -10,7 +10,14 @@ A download manager in the spirit of Internet Download Manager. It's built for ra
 - signed updates
 - security checks on everything it downloads
 
-## Run
+## Install (Windows)
+Download **PyDM-Setup-x.y.exe** from [Releases](https://github.com/mahgob601/PyDM/releases/latest) and run it.
+- Installs for your account only, so no admin prompt (choose "all users" on the first page if you prefer).
+- ffmpeg is included, so HD video and MP3 work out of the box.
+- PyDM checks for updates on its own. Every update is signed, and the installer is verified before it runs.
+- Windows may say "Windows protected your PC" because the installer isn't code-signed yet: click **More info → Run anyway**.
+
+## Run from source
 ```
 pip install -r requirements.txt      # PySide6 + optional extras (yt-dlp, cryptography, psutil, qrcode)
 python run.py                        # or: python -m pydm   (--hidden = start in tray)
@@ -25,12 +32,21 @@ python -m pydm --cli https://youtu.be/… --video -q 1080
 python -m pydm --cli https://…/master.m3u8 -n talk.mp4
 python -m pydm --cli ftp://user:pass@host/file.iso -x --checksum sha256:<hash>
 ```
-## Build a Windows .exe
+## Build the Windows installer
 ```
-pip install pyinstaller
-pyinstaller --noconfirm --windowed --name PyDM --collect-submodules pydm run.py
+powershell -ExecutionPolicy Bypass -File tools\build_windows.ps1     # PyDM.exe + ffmpeg + Inno Setup
+powershell -ExecutionPolicy Bypass -File tools\smoke_installer.ps1   # install, run, self-update, uninstall
 ```
-The output is `dist\PyDM\PyDM.exe`. Ship the `extension` folder alongside it.
+Output: `build\installer\PyDM-Setup-<version>.exe`.
+
+## Publishing a release
+1. Bump `VERSION` in `pydm/core/util.py`, commit, push.
+2. `git tag v<version> && git push origin v<version>`
+
+`.github/workflows/release.yml` then builds on GitHub's Windows machines, runs the installer smoke
+test, signs `latest.json` with the `RELEASE_SIGNING_KEY` secret (it must match `PUBLIC_KEY` in
+`pydm/release.py`), publishes the release and checks the live update feed. Run the workflow by hand
+for a dry run without publishing.
 
 ## Speed: measured, v2 vs v3
 Same 100 MB file and same machine, against a test server that simulates real-world conditions.
@@ -125,7 +141,7 @@ Browser and privacy protections:
 - cookies and secret headers are never written to disk
 
 ## Browser integration (Chrome / Edge / Brave)
-1. Open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and choose the `extension` folder.
+1. Open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and choose the `browser-extension` folder in PyDM's install folder (Start menu → "PyDM browser extension (folder)"), or `extension` when running from source.
 2. Right-click a link and choose **Download with PyDM**, or let it catch downloads automatically.
 3. Approve the extension once when PyDM asks.
 

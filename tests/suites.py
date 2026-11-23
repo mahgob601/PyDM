@@ -277,7 +277,8 @@ def suite_features(t):
         f.write(os.urandom(300000))
     uport = t.free_port()
     subprocess.run([sys.executable, tools, "sign", "Setup.exe", "9.9",
-                    f"http://127.0.0.1:{uport}/Setup.exe", "notes"], cwd=upd,
+                    f"http://127.0.0.1:{uport}/Setup.exe", "notes", "--key", "release_key.pem",
+                    "--out", "manifest.json"], cwd=upd,
                    capture_output=True, check=True)
     from cryptography.hazmat.primitives import serialization
     key = serialization.load_pem_private_key(open(os.path.join(upd, "release_key.pem"),
@@ -288,6 +289,13 @@ def suite_features(t):
     time.sleep(1)
     man = updater.check(f"http://127.0.0.1:{uport}/manifest.json", pub)
     t.check("updates: valid signed manifest accepted", man and man["version"] == "9.9")
+    t.check("updates: '4.1' and '4.1.0' are the same version (no update loop)",
+            updater.parse_version("4.1") == updater.parse_version("v4.1.0") and
+            updater.parse_version("4.1.1") > updater.parse_version("4.1"))
+    from pydm import release
+    t.check("updates: official build points at signed GitHub releases",
+            release.UPDATE_URL.startswith("https://github.com/") and
+            len(base64.b64decode(release.PUBLIC_KEY)) == 32)
     orig = open(os.path.join(upd, "manifest.json"), "rb").read()
     open(os.path.join(upd, "manifest.json"), "wb").write(orig.replace(b"9.9", b"9.8"))
     try:

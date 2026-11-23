@@ -1,10 +1,12 @@
 """Sign PyDM releases.
 
   python tools/sign_release.py keygen                      # once: creates release_key.pem
-  python tools/sign_release.py sign PyDM-Setup.exe 3.1 https://…/PyDM-Setup.exe "notes"
-      → writes manifest.json and manifest.json.sig; upload both next to each other.
+  python tools/sign_release.py sign PyDM-Setup.exe 4.1 https://…/PyDM-Setup.exe "notes" \
+         [--key release_key.pem] [--out latest.json]
+      → writes latest.json and latest.json.sig; upload both next to each other.
 
-Keep release_key.pem secret and offline. Paste the printed public key into pydm/release.py.
+Official releases are signed by .github/workflows/release.yml (key in the RELEASE_SIGNING_KEY
+secret). Keep release_key.pem secret and offline; its public key is in pydm/release.py.
 """
 import base64
 import hashlib
@@ -26,7 +28,7 @@ def keygen(path="release_key.pem"):
     print("PUBLIC_KEY =", repr(base64.b64encode(pub).decode()))
 
 
-def sign(installer, version, url, notes="", key_path="release_key.pem", out="manifest.json"):
+def sign(installer, version, url, notes="", key_path="release_key.pem", out="latest.json"):
     h = hashlib.sha256()
     with open(installer, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
@@ -46,6 +48,13 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "keygen":
         keygen(*sys.argv[2:3])
     elif len(sys.argv) >= 5 and sys.argv[1] == "sign":
-        sign(*sys.argv[2:6])
+        args, opts = [], {}
+        it = iter(sys.argv[2:])
+        for a in it:
+            if a in ("--key", "--out"):
+                opts["key_path" if a == "--key" else "out"] = next(it)
+            else:
+                args.append(a)
+        sign(*args[:4], **opts)
     else:
         print(__doc__)

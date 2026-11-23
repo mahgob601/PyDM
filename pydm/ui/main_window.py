@@ -1048,8 +1048,16 @@ class MainWindow(QMainWindow):
             self.toasts.show("Update rejected", "The installer didn't match the signed "
                                                 "checksum and was not opened.", "danger")
             return
-        self.toasts.show("Update ready", "The installer is verified.", "safe",
-                         [("Install now", lambda: open_path(d.path)), ("Later", lambda: None)])
+        def install():
+            try:
+                updater.launch_installer(d.path)
+            except (updater.UpdateError, OSError):
+                open_path(d.path)                 # not Windows / couldn't start: let the user run it
+                return
+            self.quit()                           # free our files; the installer restarts PyDM
+        self.toasts.show("Update ready", "The installer is verified. PyDM will close, update "
+                                         "and start again.", "safe",
+                         [("Install now", install), ("Later", lambda: None)])
 
     def notify(self, title, text, level="info", actions=None):
         if not self.m.settings["notifications"]:

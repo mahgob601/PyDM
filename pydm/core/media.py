@@ -19,6 +19,12 @@ def ffmpeg_path(settings=None):
     custom = (settings or {}).get("ffmpeg_path")
     if custom and os.path.isfile(custom):
         return custom
+    app_dir = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                              else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for cand in (os.path.join(app_dir, "ffmpeg", "ffmpeg.exe"),
+                 os.path.join(app_dir, "ffmpeg", "ffmpeg")):
+        if os.path.isfile(cand):                 # shipped with the Windows installer
+            return cand
     p = shutil.which("ffmpeg")
     if p:
         return p
