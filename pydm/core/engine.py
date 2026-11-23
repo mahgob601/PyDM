@@ -807,8 +807,9 @@ class Download:
         self.path, self.filename = path, os.path.basename(path)
         try:
             open(self.temp_path, "wb").close()
-            if self.total and self._settings().get("sparse_files", False):
-                make_sparse(self.temp_path)
+            if self.total:
+                if self._settings().get("sparse_files", False):
+                    make_sparse(self.temp_path)
                 with open(self.temp_path, "r+b") as f:
                     f.truncate(self.total)
         except OSError as e:
