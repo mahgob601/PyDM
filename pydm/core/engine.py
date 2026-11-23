@@ -11,7 +11,8 @@ Speed techniques
   * Slow-connection replacement: a connection far below the median is re-dialled (often
     lands on a faster CDN node / route).
   * Multi-source: the same file is pulled from several mirrors at once, weighted by speed.
-  * NTFS sparse pre-allocation on Windows (avoids zero-filling the file before writing).
+  * Plain pre-allocation. (NTFS sparse files were tried: writes into them measured ~50 MB/s
+    against ~2.4 GB/s for a plain file on Windows Server 2025, so they're opt-in only.)
 """
 import base64
 import collections
@@ -77,6 +78,7 @@ DEFAULT_SETTINGS = {
     "block_downgrade_redirects": True,
     "block_insecure_executables": False,
     "mark_of_the_web": True,
+    "sparse_files": False,          # NTFS sparse pre-allocation: opt-in (slow writes)
     "antivirus_scan": True,
     "virustotal_api_key": "",
     "confirm_risky_open": True,
@@ -382,8 +384,10 @@ def as_local(e):
     sniffing a file the antivirus just removed fails with EINVAL/ENOENT + the file name."""
     if isinstance(e, LocalFileError):
         return e
+    # urllib's HTTPError/URLError are OSErrors too, and HTTPError.filename is the URL.
     if (isinstance(e, OSError) and getattr(e, "filename", None)
-            and not isinstance(e, (ConnectionError, socket.timeout, socket.gaierror))):
+            and not isinstance(e, (urllib.error.URLError, ConnectionError, socket.timeout,
+                                   socket.gaierror, ssl.SSLError))):
         return local_file_error(e)
     return None
 
@@ -803,7 +807,7 @@ class Download:
         self.path, self.filename = path, os.path.basename(path)
         try:
             open(self.temp_path, "wb").close()
-            if self.total:
+            if self.total and self._settings().get("sparse_files", False):
                 make_sparse(self.temp_path)
                 with open(self.temp_path, "r+b") as f:
                     f.truncate(self.total)

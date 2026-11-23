@@ -562,15 +562,17 @@ def suite_windows(t):
                 "antivirus" in (e.error or "").lower() and not e.retry_at, e.error)
     t.note("EICAR outcome", f"status={e.status}, error={e.error!r}, "
                             f"findings={[f['text'] for f in sec.get('findings', [])]}")
-    # sparse pre-allocation
-    sp = m.add(t.url("core") + "f100.bin", filename="sparse.bin", connections=4, auto_tune=False)
+    # pre-allocation: full size up front, plain (not sparse — sparse writes are ~50x slower)
+    sp = m.add(t.url("core") + "f100.bin", filename="prealloc.bin", connections=4,
+               auto_tune=False)
     t.wait_running(m, sp, 1.5)
     try:
-        attrs = os.stat(sp.temp_path).st_file_attributes
-        is_sparse = bool(attrs & 0x200)
+        st = os.stat(sp.temp_path)
+        attrs, full = st.st_file_attributes, st.st_size == sp.total
     except (OSError, TypeError) as ex:
-        is_sparse, attrs = False, ex
-    t.check("NTFS sparse file used for pre-allocation", is_sparse, f"attributes={attrs}")
+        attrs, full = ex, False
+    t.check("file pre-allocated to full size, plain NTFS (fast path)",
+            full and isinstance(attrs, int) and not attrs & 0x200, f"attributes={attrs}")
     m.pause(sp)
     t.wait(m, sp)
     # sleep prevention
