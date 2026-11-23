@@ -41,12 +41,11 @@ Output: `build\installer\PyDM-Setup-<version>.exe`.
 
 ## Publishing a release
 1. Bump `VERSION` in `pydm/core/util.py`, commit, push.
-2. `git tag v<version> && git push origin v<version>`
+2. GitHub → **Actions → release → Run workflow**, tick **publish** (or push a tag `v<version>`).
 
 `.github/workflows/release.yml` then builds on GitHub's Windows machines, runs the installer smoke
 test, signs `latest.json` with the `RELEASE_SIGNING_KEY` secret (it must match `PUBLIC_KEY` in
-`pydm/release.py`), publishes the release and checks the live update feed. Run the workflow by hand
-for a dry run without publishing.
+`pydm/release.py`), publishes the release and checks the live update feed. Leave **publish** unticked for a dry run.
 
 ## Speed: measured, v2 vs v3
 Same 100 MB file and same machine, against a test server that simulates real-world conditions.
