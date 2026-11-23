@@ -1,7 +1,7 @@
 name: windows-tests
+# Manual: the self-hosted Windows runner only exists while a test box is up
+# (tools/ec2-userdata.ps1). Start a run from the Actions tab once it shows as Idle.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
