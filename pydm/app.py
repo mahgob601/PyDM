@@ -150,6 +150,13 @@ def main():
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    # Windows consoles default to a legacy code page (cp1252/cp437): video titles, file names
+    # and our own "—" must never crash a download just because the terminal can't show them.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(prog="pydm", description=f"{APP_NAME} {VERSION} — "
                                                           "multi-connection download manager")
     ap.add_argument("--cli", metavar="URL", help="download URL in the terminal (no GUI)")

@@ -19,6 +19,11 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+for _s in (sys.stdout, sys.stderr):  # CI consoles on Windows are cp1252; never die on a "→"
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 from tests import fixtures  # noqa: E402
 from tests.suites import SUITES  # noqa: E402
 
