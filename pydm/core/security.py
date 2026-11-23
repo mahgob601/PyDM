@@ -7,6 +7,7 @@ After:   real file type from magic bytes (catches "invoice.pdf" that is really a
          Mark-of-the-Web, antivirus scan, optional VirusTotal hash lookup.
 """
 import hashlib
+import re
 import json
 import os
 import shutil
@@ -79,7 +80,8 @@ def overall(findings):
 
 # --------------------------------------------------------------------------- before
 def double_extension(name):
-    parts = name.lower().split(".")
+    # strip(): "report.pdf      .exe" pads the real extension out of sight in narrow columns
+    parts = [p.strip() for p in name.lower().split(".")]
     return len(parts) >= 3 and parts[-2] in CONTENT_EXTS and parts[-1] in DANGEROUS_EXTS
 
 
@@ -91,8 +93,12 @@ def name_findings(raw_name):
                                      "a program look like a document (they were removed)."))
     clean = HIDDEN_CHARS.sub("", name)
     if double_extension(clean):
-        out.append(finding("danger", f"Double extension “{'.'.join(clean.split('.')[-2:])}” — "
-                                     "a classic trick to disguise a program as a document."))
+        shown = ".".join(p.strip() for p in clean.split(".")[-2:])
+        padded = bool(re.search(r"\s{2,}\.[^.]+$", clean))
+        out.append(finding("danger", f"Double extension “{shown}” — a classic trick to disguise "
+                                     "a program as a document" +
+                                     (", with spaces added to push the real extension out of "
+                                      "view." if padded else ".")))
     return out
 
 

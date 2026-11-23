@@ -446,8 +446,18 @@ def suite_speed(t):
         m = t.manager("speed_" + label, antivirus_scan=False)
         d = m.add(url, **kw)
         t0 = time.time()
-        t.wait(m, d, 300)
+        t_xfer = None
+        while time.time() - t0 < 300:                 # like t.wait, but note when bytes stop
+            m.schedule()
+            if t_xfer is None and d.status not in ("Queued", "Downloading", "Connecting"):
+                t_xfer = time.time() - t0
+            if not d.is_running() and (d.status in ("Completed", "Paused") or
+                                       (d.status == "Error" and not d.retry_at)):
+                break
+            time.sleep(0.02)
         el = time.time() - t0
+        if t_xfer:
+            t.metrics[label + " · transfer only"] = round((d.total or 0) / t_xfer / 2**20, 1)
         mbps = (d.total or 0) / el / 2**20 if el else 0
         src = t.p("srv/" + url.rsplit("/", 1)[-1])
         ok = d.status == "Completed" and same(d.path, src)
@@ -482,6 +492,35 @@ def suite_speed(t):
         got = sum(ex.map(pull, range(8)))
     base = got / (time.time() - t0) / 2**20
     t.metrics["bench server alone, 8 readers, no disk"] = round(base, 1)
+    # Disk alone, through PyDM's own FileWriter: 8 threads, 8 regions, 256 KB writes.
+    from pydm.core.engine import FileWriter, make_sparse
+    blob = memoryview(os.urandom(256 * 1024))
+
+    def disk(sparse):
+        path = os.path.join(t.dir("speedlab"), f"w_{int(sparse)}.bin")
+        open(path, "wb").close()
+        if sparse:
+            make_sparse(path)
+        with open(path, "r+b") as f:
+            f.truncate(size)
+        fw = FileWriter(path)
+
+        def region(i):
+            pos, end = i * part, (size if i == 7 else (i + 1) * part)
+            while pos < end:
+                n = min(len(blob), end - pos)
+                fw.write(pos, blob[:n])
+                pos += n
+        t0 = time.time()
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            list(ex.map(region, range(8)))
+        fw.close()
+        mbps = size / (time.time() - t0) / 2**20
+        os.remove(path)
+        return mbps
+    for sparse in (True, False):
+        t.metrics[f"disk alone, FileWriter, {'sparse' if sparse else 'plain'} file"] = \
+            round(disk(sparse), 1)
     t.note("speed baseline", f"bench server alone: {base:.1f} MB/s; PyDM raw local: "
                              f"{t.metrics.get('raw local (disk + engine)')} MB/s")
 

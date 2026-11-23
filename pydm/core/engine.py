@@ -144,6 +144,9 @@ def describe_local_error(e):
         # EINVAL when it yanks the file away mid-write.
         return ("Blocked by your antivirus (Windows Security) — the file was flagged as "
                 "dangerous and removed")
+    if e.errno == 2 or win in (2, 3):
+        return ("The file was removed while it was being saved — usually by your antivirus. "
+                "Check its quarantine if you trust this file")
     if e.errno in (13, 1) or win == 5:
         return "Can't write to the download folder (access denied) — choose another folder"
     if e.errno == 30:
@@ -372,6 +375,17 @@ class HttpConn:
 
 class LocalFileError(OSError):
     """Writing to the user's disk failed (not the network): antivirus, permissions, disk."""
+
+
+def as_local(e):
+    """An OSError about a file on disk (it names one) is ours, not the network's: hashing or
+    sniffing a file the antivirus just removed fails with EINVAL/ENOENT + the file name."""
+    if isinstance(e, LocalFileError):
+        return e
+    if (isinstance(e, OSError) and getattr(e, "filename", None)
+            and not isinstance(e, (ConnectionError, socket.timeout, socket.gaierror))):
+        return local_file_error(e)
+    return None
 
 
 def local_file_error(e):
@@ -889,6 +903,7 @@ class Download:
             self.status, self.error = "Error", str(e)
             self._emit("blocked")
         except Exception as e:  # noqa: BLE001
+            e = as_local(e) or e
             self.status = "Error"
             self.error = ("Disk is full — free some space, then resume" if disk_full(e)
                           else describe_local_error(e) if isinstance(e, LocalFileError)
@@ -1519,8 +1534,8 @@ class Download:
         if isinstance(e, BlockedError):
             self._abort = str(e)
             return "abort"
-        if isinstance(e, LocalFileError):           # our disk, not the network: don't redial
-            self._abort = describe_local_error(e)
+        if as_local(e):                             # our disk, not the network: don't redial
+            self._abort = describe_local_error(as_local(e))
             return "abort"
         if code in (429, 503):
             self._throttled(w)
