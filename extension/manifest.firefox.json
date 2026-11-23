@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "PyDM \u2014 Download Manager Integration",
+  "short_name": "PyDM",
+  "version": "4.0",
+  "description": "Send downloads, videos and links to the PyDM download manager. Must be approved once inside the PyDM app.",
+  "permissions": [
+    "contextMenus",
+    "downloads",
+    "storage",
+    "cookies",
+    "webRequest",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "PyDM",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pydm@pydm.local",
+      "strict_min_version": "121.0"
+    }
+  }
+}

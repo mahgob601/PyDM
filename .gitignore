@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+results/
+tests/e2e/node_modules/
+build/
+dist/
+*.spec
+release_key.pem

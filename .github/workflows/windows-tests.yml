@@ -1,0 +1,48 @@
+name: windows-tests
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-tests
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: [self-hosted, Windows, pydm]
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python packages
+        run: |
+          python -m pip install --upgrade pip --quiet
+          python -m pip install -r requirements.txt pyftpdlib pyinstaller --quiet
+      - name: Browser test packages
+        working-directory: tests/e2e
+        run: npm install --no-audit --no-fund --loglevel=error
+      - name: Run all tests
+        run: python -u tests/run_all.py --out results --work C:\pydm-ci\work
+        continue-on-error: true
+      - name: Publish report to the test-results branch
+        if: always()
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          $sha = git rev-parse --short HEAD
+          $pub = Join-Path $env:RUNNER_TEMP "pub"
+          if (Test-Path $pub) { Remove-Item -Recurse -Force $pub }
+          New-Item -ItemType Directory $pub | Out-Null
+          if (Test-Path results) { Copy-Item -Recurse results\* $pub }
+          Set-Content (Join-Path $pub "COMMIT.txt") $sha
+          Set-Location $pub
+          git init -q -b test-results
+          git config user.name "pydm-ci"
+          git config user.email "pydm-ci@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Windows test results for $sha"
+          git push -q -f "https://x-access-token:$env:TOKEN@github.com/$env:REPO.git" test-results

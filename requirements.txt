@@ -1,0 +1,6 @@
+PySide6>=6.5        # the app window
+yt-dlp>=2024.1      # video sites (YouTube & 1,800+ others)
+cryptography>=41    # encrypted HLS streams, signed updates
+psutil>=5.9         # "slow down when other apps need the internet"
+qrcode>=7.4         # QR code for the phone remote
+# Also install ffmpeg (ffmpeg.org) for HD video (separate video+audio), MP3 and some streams.

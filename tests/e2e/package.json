@@ -1,0 +1,1 @@
+{ "name": "pydm-e2e", "private": true, "type": "module", "dependencies": { "puppeteer-core": "^24" } }

@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="popup.css"></head>
+<body>
+<header>
+  <div class="brand"><img src="icons/32.png" alt=""><b>PyDM</b></div>
+  <div id="status" class="status"><i></i><span>Checking…</span></div>
+</header>
+
+<section id="mediaSec">
+  <h2>Videos on this page</h2>
+  <div id="mediaList" class="list"></div>
+  <button id="videoBtn" class="primary">Download video from this page…</button>
+  <p class="hint">PyDM shows the available qualities (uses yt-dlp for video sites).</p>
+</section>
+
+<section>
+  <h2>Links on this page</h2>
+  <button id="grabBtn">Choose links to download…</button>
+  <div id="grab" hidden>
+    <div class="row"><input id="filter" placeholder="Filter, e.g. .zip or part"><select id="type">
+      <option value="">All types</option><option>Compressed</option><option>Video</option><option>Music</option>
+      <option>Documents</option><option>Programs</option><option>Images</option></select></div>
+    <label class="row small"><input type="checkbox" id="selAll" checked> Select all <span id="count"></span></label>
+    <div id="links" class="list tall"></div>
+    <button id="sendLinks" class="primary">Download selected</button>
+  </div>
+</section>
+
+<section>
+  <label class="switch"><input type="checkbox" id="catchEnabled"><span></span>Catch browser downloads</label>
+  <button id="pause5" class="ghost small">Let the browser handle downloads for 5 minutes</button>
+  <details>
+    <summary>Settings</summary>
+    <label>Only catch files larger than (KB)<input id="minSizeKB" type="number" min="0"></label>
+    <label>File types to catch<textarea id="exts" rows="3"></textarea></label>
+    <label>Never catch on these sites<textarea id="neverSites" rows="2" placeholder="mybank.com, intranet.local"></textarea></label>
+    <label>Always catch on these sites<textarea id="alwaysSites" rows="2" placeholder="releases.example.com"></textarea></label>
+    <label class="switch"><input type="checkbox" id="videoButton"><span></span>Show “Download video” button over videos</label>
+    <label>PyDM port<input id="port" type="number" min="1024" max="65535"></label>
+    <button id="save" class="primary">Save settings</button>
+  </details>
+</section>
+<script src="popup.js"></script>
+</body></html>
