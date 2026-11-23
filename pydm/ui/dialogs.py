@@ -58,6 +58,7 @@ HASH_LEN = {"md5": 32, "sha1": 40, "sha256": 64, "sha512": 128}
 def field_label(text):
     lab = QLabel(text)
     lab.setObjectName("FieldLabel")
+    lab.setWordWrap(True)          # wider Windows fonts must wrap, not push the page sideways
     return lab
 
 
@@ -628,9 +629,9 @@ class SettingsDialog(QDialog):
         g = QGridLayout()
         g.setHorizontalSpacing(16)
         g.setVerticalSpacing(8)
-        g.addWidget(field_label("MAX CONNECTIONS PER DOWNLOAD"), 0, 0)
-        g.addWidget(field_label("FIXED CONNECTIONS (auto off)"), 0, 1)
-        g.addWidget(field_label("TOTAL CONNECTION BUDGET"), 0, 2)
+        g.addWidget(field_label("MAX PER DOWNLOAD"), 0, 0)
+        g.addWidget(field_label("FIXED (AUTO-TUNE OFF)"), 0, 1)
+        g.addWidget(field_label("TOTAL FOR ALL DOWNLOADS"), 0, 2)
         self.maxc = self._spin(1, 64, s["max_connections"])
         self.conns = self._spin(1, 64, s["connections"])
         self.budget = self._spin(8, 512, s["max_total_connections"], 8)
@@ -949,6 +950,8 @@ class SettingsDialog(QDialog):
     def _page(self, title, subtitle):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setObjectName("SettingsPage")
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 8, 0)

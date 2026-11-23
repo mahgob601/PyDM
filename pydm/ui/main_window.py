@@ -8,7 +8,7 @@ from PySide6.QtCore import (QAbstractListModel, QItemSelectionModel, QModelIndex
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu,
-                               QPushButton, QScrollArea, QStackedWidget, QSystemTrayIcon,
+                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
 
 import threading
@@ -578,21 +578,37 @@ class MainWindow(QMainWindow):
         brand.addStretch()
         lay.addLayout(brand)
 
+        # Navigation scrolls when the window is short (large fonts / 125-150% scaling on
+        # Windows), so the speed card below always keeps its full height.
+        nav_box = QWidget()
+        nav_box.setObjectName("SideNav")
+        nl = QVBoxLayout(nav_box)
+        nl.setContentsMargins(0, 0, 0, 0)
+        nl.setSpacing(2)
         self.nav = {}
         for key, text, ic in VIEWS:
             b = NavButton(text, ic, key)
             b.clicked.connect(lambda _=False, k=key: self.set_view(k))
-            lay.addWidget(b)
+            nl.addWidget(b)
             self.nav[key] = b
         sec = QLabel("CATEGORIES")
         sec.setObjectName("Section")
-        lay.addWidget(sec)
+        nl.addWidget(sec)
         for cat in CATEGORY_ORDER:
             b = NavButton(cat, CAT_ICONS[cat], f"cat:{cat}")
             b.clicked.connect(lambda _=False, k=f"cat:{cat}": self.set_view(k))
-            lay.addWidget(b)
+            nl.addWidget(b)
             self.nav[f"cat:{cat}"] = b
-        lay.addStretch()
+        nl.addStretch()
+        nav_scroll = QScrollArea()
+        nav_scroll.setObjectName("SideScroll")
+        nav_scroll.setWidget(nav_box)
+        nav_scroll.setWidgetResizable(True)
+        nav_scroll.setFrameShape(QFrame.NoFrame)
+        nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        nav_scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget "
+                                 "{ background: transparent; }")
+        lay.addWidget(nav_scroll, 1)
 
         card = QFrame()
         card.setObjectName("SideCard")
@@ -613,6 +629,8 @@ class MainWindow(QMainWindow):
         self.limit_btn.setIcon(icon("gauge", C["muted"], 15))
         self.limit_btn.clicked.connect(self._limit_menu)
         cl.addWidget(self.limit_btn, 0, Qt.AlignLeft)
+        card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        lay.addSpacing(8)
         lay.addWidget(card)
         lay.addSpacing(8)
         settings = NavButton("Settings", "settings", "settings")

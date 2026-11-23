@@ -61,6 +61,18 @@ def s1():
     w.tick()
     app.processEvents()
     shot(w, "main")
+    # Worst case: a small laptop screen. The sidebar speed card must keep its full height.
+    w.resize(960, 600)
+    app.processEvents()
+    sp = w.side_spark
+    card = sp.parentWidget()
+    visible = card.visibleRegion().boundingRect().height() >= card.sizeHint().height() - 2
+    checks["sidebar speed card intact on a 960x600 window"] = [
+        sp.height() >= 30 and card.height() >= card.sizeHint().height() - 2 and visible,
+        f"spark {sp.height()}px, card {card.height()}/{card.sizeHint().height()}px"]
+    shot(w, "main_small")
+    w.resize(1400, 880)
+    app.processEvents()
     if IS_WIN:
         checks["tray icon + notification work"] = [bool(w.tray), "tray icon created"]
     if w.tray:
@@ -106,8 +118,23 @@ def s5():
     s.show()
     pages = [(1, "speed"), (2, "bandwidth"), (5, "security"), (6, "video"), (9, "remote")]
 
+    def fits():
+        from PySide6.QtWidgets import QScrollArea
+        bad = []
+        for k in range(s.stack.count()):
+            sc = s.stack.widget(k)
+            if isinstance(sc, QScrollArea) and sc.widget() is not None:
+                need = sc.widget().minimumSizeHint().width()
+                have = sc.viewport().width()
+                if need > have + 1:
+                    bad.append(f"page {k}: needs {need}px, has {have}px")
+        return bad
+
     def nxt(i=0):
         if i >= len(pages):
+            bad = fits()
+            checks["settings pages fit without sideways scrolling"] = [
+                not bad, "; ".join(bad) or f"{s.width()}x{s.height()}"]
             s.close()
             return
         s.nav.setCurrentRow(pages[i][0])
