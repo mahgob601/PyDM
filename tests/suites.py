@@ -461,14 +461,19 @@ def suite_speed(t):
         mbps = (d.total or 0) / el / 2**20 if el else 0
         src = t.p("srv/" + url.rsplit("/", 1)[-1])
         ok = d.status == "Completed" and same(d.path, src)
-        t.check(f"speed: {label} ≥ {limit} MB/s", ok and mbps >= limit,
-                f"{mbps:.1f} MB/s in {el:.1f}s, {d.tuning}, target {d.target}")
+        xfer = (d.total or 0) / t_xfer / 2**20 if t_xfer else 0
+        # Raw local gates on the transfer itself; the integrity check after it (SHA-256 read,
+        # plus Defender scanning the file on open on Windows) is reported, not gated.
+        got = xfer if label.startswith("raw") else mbps
+        t.check(f"speed: {label} ≥ {limit} MB/s", ok and got >= limit,
+                f"{mbps:.1f} MB/s in {el:.1f}s incl. verification, transfer {xfer:.1f} MB/s, "
+                f"{d.tuning}, target {d.target}")
         t.metrics[label] = round(mbps, 1)
         shutil.rmtree(os.path.dirname(d.path), ignore_errors=True)
     run("CDN, 1 MB/s per connection", t.url("cdn") + "f100.bin", 12)
     run("flaky server", t.url("flaky") + "f100.bin", 8)
     run("two mirrors", t.url("mirror1") + "f100.bin", 9, mirrors=[t.url("mirror2") + "f100.bin"])
-    run("raw local (disk + engine)", t.url("raw") + "f400.bin", 80, connections=8,
+    run("raw local (disk + engine, transfer)", t.url("raw") + "f400.bin", 80, connections=8,
         auto_tune=False)
     # Baseline without the engine: 8 threads reading the same file into memory and dropping it.
     # If this is slow too, the bench server (not PyDM) is the limit on this machine.
@@ -522,7 +527,7 @@ def suite_speed(t):
         t.metrics[f"disk alone, FileWriter, {'sparse' if sparse else 'plain'} file"] = \
             round(disk(sparse), 1)
     t.note("speed baseline", f"bench server alone: {base:.1f} MB/s; PyDM raw local: "
-                             f"{t.metrics.get('raw local (disk + engine)')} MB/s")
+                             f"{t.metrics.get('raw local (disk + engine, transfer)')} MB/s")
 
 
 # --------------------------------------------------------------------------- Windows only
@@ -563,16 +568,17 @@ def suite_windows(t):
     t.note("EICAR outcome", f"status={e.status}, error={e.error!r}, "
                             f"findings={[f['text'] for f in sec.get('findings', [])]}")
     # pre-allocation: full size up front, plain (not sparse — sparse writes are ~50x slower)
-    sp = m.add(t.url("core") + "f100.bin", filename="prealloc.bin", connections=4,
-               auto_tune=False)
+    sp = m.add(t.url("cdn") + "f100.bin", filename="prealloc.bin", connections=4,
+               auto_tune=False)                     # throttled: still running when we look
     t.wait_running(m, sp, 1.5)
     try:
         st = os.stat(sp.temp_path)
-        attrs, full = st.st_file_attributes, st.st_size == sp.total
+        attrs, size = st.st_file_attributes, st.st_size
     except (OSError, TypeError) as ex:
-        attrs, full = ex, False
+        attrs, size = ex, None
     t.check("file pre-allocated to full size, plain NTFS (fast path)",
-            full and isinstance(attrs, int) and not attrs & 0x200, f"attributes={attrs}")
+            size == sp.total and isinstance(attrs, int) and not attrs & 0x200,
+            f"attributes={attrs}, size={size}, total={sp.total}, status={sp.status}")
     m.pause(sp)
     t.wait(m, sp)
     # sleep prevention
