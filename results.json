@@ -1,0 +1,742 @@
+{
+ "env": {
+  "os": "Windows-2025Server-10.0.26100-SP0",
+  "python": "3.12.10",
+  "cpu_count": 4,
+  "PySide6": "6.12.0",
+  "yt_dlp": "2026.10.26",
+  "cryptography": "50.0.2",
+  "psutil": "7.2.2",
+  "ffmpeg": "ffmpeg version 9.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFm",
+  "chrome": "C:\\pydm-ci\\chrome\\chrome\\win64-158.0.8127.36\\chrome-win64\\chrome.exe",
+  "defender": "{\n    \"AMServiceEnabled\":  true,\n    \"RealTimeProtectionEnabled\":  true,\n    \"AMProductVersion\":  \"4.18.26100.4\"\n}"
+ },
+ "results": [
+  {
+   "suite": "core",
+   "name": "multi-connection download intact + checksum verified",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "wrong checksum flagged as danger",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "exe disguised as .pdf flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "web page saved as .zip flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "double extension flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "404 gives a clear error, no retry",
+   "ok": true,
+   "info": "HTTP 404 · file not found"
+  },
+  {
+   "suite": "core",
+   "name": "Content-Disposition: filename* (UTF-8) wins over ASCII fallback",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "batch pattern expansion",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "right-to-left trick removed and flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "new address for a different file is refused",
+   "ok": true,
+   "info": "The new address points to a different file (6000000 bytes instead of 20000000)"
+  },
+  {
+   "suite": "core",
+   "name": "new address for the same file resumes",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "bridge: no-origin / website / DNS-rebinding requests rejected",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "bridge: pairing approval then trusted",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "core",
+   "name": "bridge: denied extension stays blocked",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "safe archive extracted",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "zip-slip archive refused, nothing escaped",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "post-download command ran",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "7-Zip archive extracted",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "streaming order downloads from the start",
+   "ok": true,
+   "info": "8 pieces started"
+  },
+  {
+   "suite": "reliability",
+   "name": "file changed while paused → restarted, new content",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "reliability",
+   "name": "server dies → retry scheduled, progress kept",
+   "ok": true,
+   "info": "Network error: server refused the connection · kept 25 MB"
+  },
+  {
+   "suite": "reliability",
+   "name": "server back → download finishes intact",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "FTP multi-connection with login",
+   "ok": true,
+   "info": "7.0s, 8 parts"
+  },
+  {
+   "suite": "features",
+   "name": "FTP wrong password → clear error",
+   "ok": true,
+   "info": "FTP 530 Authentication failed."
+  },
+  {
+   "suite": "features",
+   "name": "FTP pause/resume",
+   "ok": true,
+   "info": "paused at 46 MB"
+  },
+  {
+   "suite": "features",
+   "name": "checksum found in SHA256SUMS and verified",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "checksum found in .sha256 sidecar and verified",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "checksum parser formats",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "duplicate detected by hash",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "history statistics",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "page grabber: depth 2, same-site, de-duplicated",
+   "ok": true,
+   "info": "movie720.mp4, manual.pdf, a.zip, b.zip, pic1.png, x.zip, deep.mp3, lvl3.iso"
+  },
+  {
+   "suite": "features",
+   "name": "time-of-day speed rule",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "yield to other apps",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "psutil network counters work here (needed for 'yield')",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "remote: page served with strict CSP",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "remote: API requires the token",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "remote: add from phone",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "remote: lockout after repeated wrong tokens",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "updates: valid signed manifest accepted",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "updates: tampered manifest refused",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "updates: installer verified against signed SHA-256",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "phone notification (ntfy) sent",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "features",
+   "name": "bridge: batch + video endpoints",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "hls",
+   "name": "HLS plain .ts",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video720']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS AES-128 explicit IV",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video720']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS AES-128 implicit IV",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video720']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS fMP4",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video720']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS master → best + separate audio",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video720']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS master → 360p",
+   "ok": true,
+   "info": "Completed (30, ['audio', 'video360']) "
+  },
+  {
+   "suite": "hls",
+   "name": "HLS DRM stream refused",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "hls",
+   "name": "HLS decryption via ffmpeg (no cryptography pkg)",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "hls",
+   "name": "video+audio job: pause → app restart → resume",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "media",
+   "name": "yt-dlp: video on a web page",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "media",
+   "name": "yt-dlp: stream qualities listed",
+   "ok": true,
+   "info": "['720p', '360p', 'Audio only', 'Audio only (MP3)']"
+  },
+  {
+   "suite": "media",
+   "name": "separate video + audio merged (YouTube-style)",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "media",
+   "name": "MP3 conversion",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "media",
+   "name": "DASH stream via yt-dlp",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "media",
+   "name": "expired video link refreshed automatically",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "windows",
+   "name": "Microsoft Defender command-line scanner found",
+   "ok": true,
+   "info": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\CurrentVersion\\MpCmdRun.exe"
+  },
+  {
+   "suite": "windows",
+   "name": "Defender scan of a clean file → clean",
+   "ok": true,
+   "info": "Microsoft Defender: no threats found"
+  },
+  {
+   "suite": "windows",
+   "name": "Mark-of-the-Web written (SmartScreen/Office protection)",
+   "ok": true,
+   "info": "[ZoneTransfer]\n\nZoneId=3\n\nHostUrl=http://127.0.0.1:53548/files/a.zip\n\n"
+  },
+  {
+   "suite": "windows",
+   "name": "EICAR test virus caught (scan or real-time protection)",
+   "ok": true,
+   "info": "Error · Blocked by your antivirus (Windows Security) — the file was flagged as dangerous and removed · file exists: True"
+  },
+  {
+   "suite": "windows",
+   "name": "blocked virus: clear antivirus message, never auto-retried",
+   "ok": true,
+   "info": "Blocked by your antivirus (Windows Security) — the file was flagged as dangerous and removed"
+  },
+  {
+   "suite": "windows",
+   "name": "file pre-allocated to full size, plain NTFS (fast path)",
+   "ok": true,
+   "info": "attributes=32, size=100000000, total=100000000, status=Downloading"
+  },
+  {
+   "suite": "windows",
+   "name": "keeps the PC awake while downloading (powercfg /requests)",
+   "ok": true,
+   "info": "[PROCESS] \\Device\\HarddiskVolume3\\Program Files\\Python312\\python.exe"
+  },
+  {
+   "suite": "windows",
+   "name": "full-screen detection API answers",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "windows",
+   "name": "hostile file names download safely",
+   "ok": true,
+   "info": "con='_CON.txt'/Completed · spaces='report.pdf.exe'/Completed · illegal='a_b_c_d_e_f_g_h.zip'/Completed · dots='trailing'/Completed · unicode='تقرير ✓ résumé.pdf'/Completed · rtlo='invoicefdp.exe'/Completed · long='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.zip'/Completed"
+  },
+  {
+   "suite": "windows",
+   "name": "reserved name CON is renamed",
+   "ok": true,
+   "info": "_CON.txt"
+  },
+  {
+   "suite": "windows",
+   "name": "no illegal characters / trailing dots",
+   "ok": true,
+   "info": "'a_b_c_d_e_f_g_h.zip', 'trailing'"
+  },
+  {
+   "suite": "windows",
+   "name": "'report.pdf      .exe' collapsed and flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "windows",
+   "name": "Arabic/accented names preserved",
+   "ok": true,
+   "info": "تقرير ✓ résumé.pdf"
+  },
+  {
+   "suite": "windows",
+   "name": "RTLO name cleaned and flagged",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "windows",
+   "name": "very long name shortened",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "windows",
+   "name": "download folder with spaces + Unicode",
+   "ok": true,
+   "info": "C:\\pydm-ci\\work\\runs\\windows\\Téléchargements test ✓\\Documents\\manual.pdf"
+  },
+  {
+   "suite": "windows",
+   "name": "only one copy of PyDM can run",
+   "ok": true,
+   "info": "False"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: extension loads (MV3 service worker)",
+   "ok": true,
+   "info": "mddphhpdoefjjfenjfminbephajioapa"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: first request triggers pairing approval in PyDM",
+   "ok": true,
+   "info": "chrome-extension://mddphhpdoefjjfenjfminbephajioapa"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: catches /download?id=1 using the real file name",
+   "ok": true,
+   "info": "report-2026.zip"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: passes cookies + referrer + size",
+   "ok": true,
+   "info": "sess=abc123 | http://127.0.0.1:53554/page.html | 600000"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: browser's own download cancelled & erased",
+   "ok": true,
+   "info": "[]"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: small file (<256 KB) left to the browser",
+   "ok": true,
+   "info": "small.zip"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: 'never catch on this site' rule respected",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "extension",
+   "name": "extension: detects page video + HLS playlist",
+   "ok": true,
+   "info": "video:movie720.mp4, hls:index.m3u8"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: toolbar badge shows video count",
+   "ok": true,
+   "info": "2"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: video button injected over the player",
+   "ok": true,
+   "info": "Download video"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: video button sends page + streams to PyDM",
+   "ok": true,
+   "info": "movie720.mp4,index.m3u8"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: button confirms 'Sent to PyDM'",
+   "ok": true,
+   "info": "Sent to PyDM"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: popup shows connection status",
+   "ok": true,
+   "info": "Connected"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: popup lists detected videos",
+   "ok": true,
+   "info": "2 rows"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: popup grabs page links (pages filtered out)",
+   "ok": true,
+   "info": "Compressedtiny | Compressediso | Compressedp1 | Compressedp2 | Documentsguide | Imagespic | Videomovie720.mp4"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: filter by type + send batch",
+   "ok": true,
+   "info": "Download 4 files -> small.zip,ubuntu.iso,part1.rar,part2.rar"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: popup saves settings",
+   "ok": true,
+   "info": "{\"minSizeKB\":1024}"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: context menu 'Download all links'",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "extension",
+   "name": "extension: context menu 'Download with PyDM'",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "extension",
+   "name": "extension: 'let the browser handle it for 5 min' works",
+   "ok": true,
+   "info": "report-2026.zip,small.zip,ubuntu.iso"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: web pages can't send downloads to PyDM",
+   "ok": true,
+   "info": "blocked: Failed to fetch"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: PyDM offline -> browser keeps the download",
+   "ok": true,
+   "info": "report-2026.zip"
+  },
+  {
+   "suite": "extension",
+   "name": "extension: video button reports PyDM offline",
+   "ok": true,
+   "info": "PyDM isn't running"
+  },
+  {
+   "suite": "gui",
+   "name": "app window, dialogs and settings render",
+   "ok": true,
+   "info": "11 screenshots · "
+  },
+  {
+   "suite": "gui",
+   "name": "system tray available",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "gui",
+   "name": "sidebar speed card intact on a 960x600 window",
+   "ok": true,
+   "info": "spark 38px, card 157/157px"
+  },
+  {
+   "suite": "gui",
+   "name": "tray icon + notification work",
+   "ok": true,
+   "info": "tray icon created"
+  },
+  {
+   "suite": "gui",
+   "name": "video dialog finds qualities",
+   "ok": true,
+   "info": "3 options"
+  },
+  {
+   "suite": "gui",
+   "name": "grabber dialog lists files",
+   "ok": true,
+   "info": "8 files"
+  },
+  {
+   "suite": "gui",
+   "name": "settings pages fit without sideways scrolling",
+   "ok": true,
+   "info": "804x581"
+  },
+  {
+   "suite": "gui",
+   "name": "full-screen app detected (quiet mode trigger)",
+   "ok": true,
+   "info": "before=False during=True"
+  },
+  {
+   "suite": "gui",
+   "name": "real app starts and keeps running (tray mode)",
+   "ok": true,
+   "info": ""
+  },
+  {
+   "suite": "speed",
+   "name": "speed: CDN, 1 MB/s per connection ≥ 12 MB/s",
+   "ok": true,
+   "info": "14.4 MB/s in 6.6s incl. verification, transfer 15.6 MB/s, max, target 32"
+  },
+  {
+   "suite": "speed",
+   "name": "speed: flaky server ≥ 8 MB/s",
+   "ok": true,
+   "info": "10.0 MB/s in 9.6s incl. verification, transfer 10.6 MB/s, max, target 32"
+  },
+  {
+   "suite": "speed",
+   "name": "speed: two mirrors ≥ 9 MB/s",
+   "ok": true,
+   "info": "10.7 MB/s in 9.0s incl. verification, transfer 11.3 MB/s, optimal, target 8"
+  },
+  {
+   "suite": "speed",
+   "name": "speed: raw local (disk + engine, transfer) ≥ 80 MB/s",
+   "ok": true,
+   "info": "81.3 MB/s in 4.7s incl. verification, transfer 137.3 MB/s, fixed, target 8"
+  },
+  {
+   "suite": "package",
+   "name": "PyInstaller builds PyDM.exe",
+   "ok": true,
+   "info": "C:\\pydm-ci\\work\\runs\\pyinstaller\\dist\\PyDM\\PyDM.exe"
+  },
+  {
+   "suite": "package",
+   "name": "PyDM.exe starts and keeps running",
+   "ok": true,
+   "info": "exit code None"
+  },
+  {
+   "suite": "package",
+   "name": "PyDM.exe --cli downloads a file",
+   "ok": true,
+   "info": "exit 0"
+  },
+  {
+   "suite": "package",
+   "name": "PyDM.exe includes yt-dlp (video page download)",
+   "ok": true,
+   "info": "exit 0"
+  },
+  {
+   "suite": "package",
+   "name": "PyDM.exe includes cryptography (encrypted stream)",
+   "ok": true,
+   "info": "exit 0"
+  }
+ ],
+ "metrics": {
+  "CDN, 1 MB/s per connection · transfer only": 15.6,
+  "CDN, 1 MB/s per connection": 14.4,
+  "flaky server · transfer only": 10.6,
+  "flaky server": 10.0,
+  "two mirrors · transfer only": 11.3,
+  "two mirrors": 10.7,
+  "raw local (disk + engine, transfer) · transfer only": 137.3,
+  "raw local (disk + engine, transfer)": 81.3,
+  "bench server alone, 8 readers, no disk": 243.7,
+  "disk alone, FileWriter, sparse file": 137.9,
+  "disk alone, FileWriter, plain file": 1861.9,
+  "exe folder MB": 132
+ },
+ "notes": [
+  "windows · EICAR outcome: status=Error, error='Blocked by your antivirus (Windows Security) — the file was flagged as dangerous and removed', findings=[]",
+  "speed · speed baseline: bench server alone: 243.7 MB/s; PyDM raw local: 81.3 MB/s"
+ ],
+ "durations": {
+  "core": 7.239039421081543,
+  "reliability": 123.29760432243347,
+  "features": 27.15274739265442,
+  "hls": 33.20112991333008,
+  "media": 17.574617385864258,
+  "windows": 7.637200593948364,
+  "extension": 29.310508966445923,
+  "gui": 42.56532907485962,
+  "speed": 42.89505076408386,
+  "package": 152.2944450378418
+ }
+}
