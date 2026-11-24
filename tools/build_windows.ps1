@@ -35,9 +35,11 @@ if (-not (Test-Path (Join-Path $ff "ffmpeg.exe"))) {
     foreach ($flavor in @("lgpl", "gpl")) {     # LGPL preferred; GPL only if LGPL lacks MP3
         $name = "ffmpeg-master-latest-win64-$flavor"
         $zip = Join-Path $build "$name.zip"
+        # checksums first: "latest" is rebuilt daily, so read the list, then fetch the zip
+        $sumsFile = Join-Path $build "checksums.sha256"
+        Invoke-WebRequest "$base/checksums.sha256" -OutFile $sumsFile -UseBasicParsing   # served as binary
         Invoke-WebRequest "$base/$name.zip" -OutFile $zip -UseBasicParsing
-        $sums = (Invoke-WebRequest "$base/checksums.sha256" -UseBasicParsing).Content
-        $line = ($sums -split "`n") | Where-Object { $_ -match " \*?$name\.zip\s*$" } | Select-Object -First 1
+        $line = Get-Content $sumsFile | Where-Object { $_ -match "^[0-9a-fA-F]{64}\s+\*?$([regex]::Escape($name))\.zip\s*$" } | Select-Object -First 1
         if (-not $line) { throw "no published checksum for $name.zip" }
         $want = ($line -split "\s+")[0].ToLower()
         $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
