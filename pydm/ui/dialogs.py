@@ -880,6 +880,11 @@ class SettingsDialog(QDialog):
         brow.addWidget(regen)
         brow.addStretch()
         qcol.addLayout(brow)
+        if remote.firewall_needed():
+            fw = QPushButton("Allow through Windows Firewall")
+            fw.setToolTip("Adds one firewall rule: this port, devices on your local network only")
+            fw.clicked.connect(lambda: remote.request_firewall_rule(self.remote_port.value()))
+            qcol.addWidget(fw)
         qcol.addWidget(hint("The link contains a secret key. Anyone who has it can control "
                             "PyDM — make a new one if it leaks. Use only on Wi-Fi you trust."))
         qcol.addStretch()

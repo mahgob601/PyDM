@@ -1017,6 +1017,14 @@ class MainWindow(QMainWindow):
         except OSError as e:
             self.remote_srv = None
             self.toasts.show("Remote control couldn't start", str(e), "caution")
+            return
+        port = int(s["remote_port"])
+        if s["remote_lan"] and not remote.firewall_rule_ok(port):
+            self.toasts.show("Let your phone reach PyDM",
+                             "Windows Firewall blocks phones by default. Allow PyDM on your "
+                             "local network (Windows will ask for permission once).", "caution",
+                             [("Allow", lambda: remote.request_firewall_rule(port)),
+                              ("Not now", lambda: None)])
 
     def check_updates(self, quiet=True):
         from .. import release

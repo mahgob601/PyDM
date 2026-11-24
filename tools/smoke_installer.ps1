@@ -98,6 +98,13 @@ if ($res -match "FORMATS (\d+) (\d+)") {
     & $Python -m pip show yt-dlp yt-dlp-ejs 2>&1 | Select-String "Name|Version"
 }
 
+# --- phone remote: firewall rule for the local network (CI runs elevated, so no UAC prompt)
+& $Python -c "import sys, time; sys.path.insert(0, r'$root'); from pydm.core import remote as r; r.request_firewall_rule(9615); time.sleep(5); sys.exit(0 if r.firewall_rule_ok(9615) else 1)"
+Check "phone remote: Windows Firewall rule added (local network only)" ($LASTEXITCODE -eq 0)
+$rule = netsh advfirewall firewall show rule name="PyDM remote (TCP 9615)" | Out-String
+Check "firewall rule limited to the local subnet" ($rule -match "LocalSubnet") ($rule -split "`n" | Select-String "RemoteIP|LocalPort" | Out-String).Trim()
+netsh advfirewall firewall delete rule name="PyDM remote (TCP 9615)" | Out-Null
+
 # --- self-update path: the exact code 'Install now' runs ----------------------------------
 $old = (PyDMProcs)[0]
 if ($old) {

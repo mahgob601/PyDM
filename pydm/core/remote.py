@@ -12,6 +12,8 @@ import hmac
 import json
 import secrets
 import socket
+import sys
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,14 +29,53 @@ def new_token():
 
 
 def lan_ip():
+    """This PC's address on the local network: the interface that holds the default route
+    (the Wi-Fi/Ethernet to the router), not a VPN/WSL/Hyper-V adapter."""
+    for probe in (("192.168.255.255", 1), ("8.8.8.8", 80), ("10.255.255.255", 1)):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(probe)                     # UDP connect: picks a route, sends nothing
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith(("127.", "169.254.")):
+                return ip
+        except OSError:
+            pass
+    return "127.0.0.1"
+
+
+def _rule_name(port):
+    return f"PyDM remote (TCP {int(port)})"
+
+
+def firewall_needed():
+    return sys.platform.startswith("win")
+
+
+def firewall_rule_ok(port):
+    """True if Windows Firewall already lets phones on the local network reach PyDM."""
+    if not firewall_needed():
+        return True
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("10.255.255.255", 1))      # no packets are sent for UDP connect
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except OSError:
-        return "127.0.0.1"
+        r = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule",
+                            f"name={_rule_name(port)}"], capture_output=True, text=True,
+                           timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode == 0 and "Allow" in r.stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def request_firewall_rule(port):
+    """Ask Windows (one admin prompt) to allow PyDM's remote port from the local network only."""
+    if not firewall_needed():
+        return True
+    import ctypes
+    name = _rule_name(port)
+    cmd = (f'/c netsh advfirewall firewall delete rule name="{name}" >nul 2>&1 & '
+           f'netsh advfirewall firewall add rule name="{name}" dir=in action=allow '
+           f'protocol=TCP localport={int(port)} remoteip=localsubnet profile=any')
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", cmd, None, 0)
+    return rc > 32                                   # > 32 = started; user may still say No
 
 
 def _download_json(d):
