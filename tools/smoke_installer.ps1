@@ -93,6 +93,9 @@ if ($res -match "FORMATS (\d+) (\d+)") {
     Write-Host "WARN YouTube bot-checked this machine; skipped: $($res.Trim())"
 } else {
     Check "YouTube formats found with bundled Deno" $false $res.Trim()
+    Write-Host "--- yt-dlp -v -F diagnostics"
+    & $Python -m yt_dlp -v -F --js-runtimes "deno:$env:PYDM_TEST_DENO" $yt 2>&1 | Select-Object -Last 45
+    & $Python -m pip show yt-dlp yt-dlp-ejs 2>&1 | Select-String "Name|Version"
 }
 
 # --- self-update path: the exact code 'Install now' runs ----------------------------------

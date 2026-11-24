@@ -75,12 +75,33 @@ def js_runtime():
     return None, None
 
 
-def _ydl_opts(headers=None, cookies=None):
+class _Log:
+    """Keep yt-dlp's warnings: when a site gives no formats, they say why."""
+    def __init__(self):
+        self.warnings = []
+
+    def debug(self, msg):
+        pass
+
+    def info(self, msg):
+        pass
+
+    def warning(self, msg):
+        self.warnings.append(re.sub(r"\x1b\[[0-9;]*m", "", str(msg)).replace("WARNING: ", ""))
+
+    def error(self, msg):
+        self.warning(msg)
+
+
+def _ydl_opts(headers=None, cookies=None, log=None):
     opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
             "socket_timeout": 20, "extract_flat": False,
             # list what exists; PyDM picks the format itself (avoids "Requested format is
             # not available" when a site only offers unusual formats)
             "ignore_no_formats_error": True}
+    if log is not None:
+        opts["logger"] = log
+        opts["no_warnings"] = False
     name, path = js_runtime()
     if name:
         opts["js_runtimes"] = {name: {"path": path}}
@@ -99,8 +120,9 @@ def resolve(page_url, headers=None, cookies=None):
     except ImportError as e:
         raise MediaError("Install yt-dlp to download from video websites "
                          "(pip install yt-dlp)") from e
+    log = _Log()
     try:
-        with yt_dlp.YoutubeDL(_ydl_opts(headers, cookies)) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts(headers, cookies, log)) as ydl:
             info = ydl.extract_info(page_url, download=False)
     except Exception as e:  # noqa: BLE001
         msg = re.sub(r"\x1b\[[0-9;]*m", "", str(e)).replace("ERROR: ", "")
@@ -144,8 +166,12 @@ def resolve(page_url, headers=None, cookies=None):
                              "PyDM (it ships one), or install Deno from deno.com")
         if info.get("formats") and all(f.get("has_drm") for f in info["formats"]):
             raise MediaError("This video is DRM-protected and can't be downloaded")
-        raise MediaError("No downloadable formats found — the site may need you to sign in "
-                         "(open the page in Chrome first, then use the PyDM button there)")
+        why = next((w for w in log.warnings if "format" in w.lower() or "sign in" in w.lower()
+                    or "challenge" in w.lower() or "bot" in w.lower()),
+                   log.warnings[0] if log.warnings else "")
+        raise MediaError("No downloadable formats found" + (f" — {why[:240]}" if why else
+                         " — the site may need you to sign in (open the page in Chrome, "
+                         "then use the PyDM button there)"))
     return {"title": info.get("title") or "video", "page_url": info.get("webpage_url") or page_url,
             "duration": info.get("duration"), "thumbnail": info.get("thumbnail"),
             "extractor": info.get("extractor_key") or "", "formats": formats}
