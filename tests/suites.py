@@ -109,6 +109,29 @@ def suite_core(t):
 
 # --------------------------------------------------------------------------- reliability
 def suite_reliability(t):
+    # every connection goes silent mid-transfer (socket stays open): the watchdog must
+    # reconnect long before the 60 s socket timeout configured here
+    hm = t.manager("stall", timeout=60)
+    h = hm.add(t.url("hang") + "f100.bin", connections=4, auto_tune=False)
+    t0 = time.time()
+    t.wait(hm, h, 120)
+    el = time.time() - t0
+    t.check("silent server: all connections redialed within seconds, file intact",
+            h.status == "Completed" and h.stalls >= 1 and el < 30 and
+            md5(h.path) == md5(t.p("srv/f100.bin")),
+            f"{h.status} in {el:.0f}s, {h.stalls} stall recoveries, error={h.error}")
+    h2 = hm.add(t.url("hang_some") + "f100.bin", filename="some.bin", connections=4,
+                auto_tune=False)
+    t0 = time.time()
+    t.wait(hm, h2, 120)
+    el = time.time() - t0
+    t.check("some connections go silent: replaced, full speed, file intact",
+            h2.status == "Completed" and h2.conn_restarts >= 2 and el < 20 and
+            md5(h2.path) == md5(t.p("srv/f100.bin")),
+            f"{h2.status} in {el:.0f}s, {h2.conn_restarts} connections replaced")
+    from pydm.core.util import human_time
+    t.check("time left never shows nonsense while stalled",
+            human_time(3e13) == "" and human_time(float("nan")) == "")
     m = t.manager("reliability", post_command=(
         'cmd /c copy nul "{folder}\\POST_{name}"' if IS_WIN else "touch {folder}/POST_{name}"))
     V = t.url("vid")

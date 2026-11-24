@@ -9,7 +9,7 @@ import urllib.parse
 import socket
 
 APP_NAME = "PyDM"
-VERSION = "4.1"
+VERSION = "4.2"
 APP_DIR = os.path.join(os.path.expanduser("~"), ".pydm")
 STATE_FILE = os.path.join(APP_DIR, "downloads.json")
 SETTINGS_FILE = os.path.join(APP_DIR, "settings.json")
@@ -57,7 +57,7 @@ def human_size(n):
 
 
 def human_time(s):
-    if s is None or s == float("inf"):
+    if s is None or s != s or s == float("inf") or s > 30 * 86400:
         return ""
     s = int(s)
     h, rem = divmod(s, 3600)

@@ -34,6 +34,8 @@ SERVERS = {          # name: (root, extra args) — ports assigned at start
     "mirror1": ("srv", ["--global-rate", "6000"]),
     "mirror2": ("srv", ["--global-rate", "6000"]),
     "raw": ("srv", []),
+    "hang": ("srv", ["--per-conn", "3000", "--hang", "5"]),        # probe + all 4 go silent
+    "hang_some": ("srv", ["--per-conn", "3000", "--hang", "3"]),   # probe + 2 of 4 go silent
     "vid": ("vid", ["--per-conn", "1500", "--latency", "20"]),
     "vid_slow": ("vid", ["--per-conn", "250"]),
 }

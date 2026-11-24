@@ -1,4 +1,4 @@
-# PyDM 4.1 — high-speed, secure download manager
+# PyDM 4.2 — high-speed, secure download manager
 
 A download manager in the spirit of Internet Download Manager. It's built for raw speed and adds what IDM lacks:
 

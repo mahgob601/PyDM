@@ -357,7 +357,8 @@ class DetailsPanel(QFrame):
         i = self.info
         i["Size"].setText(("~" if d.kind == "hls" and d.status != "Completed" else "") +
                           human_size(total) if total is not None else "Unknown")
-        i["Time left"].setText(human_time(d.eta) if d.is_running() and d.eta else "—")
+        i["Time left"].setText(human_time(d.eta) if d.is_running() and d.eta else
+                               "stalled" if d.is_running() and d.downloaded else "—")
         mode = "Streaming order" if d.sequential else "Fastest"
         if d.extract:
             mode += " · extract"
@@ -410,6 +411,8 @@ class DetailsPanel(QFrame):
             bits.append({"tuning": "Auto-tuning: adding connections while speed keeps rising.",
                          "optimal": "Auto-tuned: more connections wouldn't be faster.",
                          "max": "Using the maximum number of connections.",
+                         "stalled": "The server stopped sending data, so PyDM reconnected with "
+                                    "fewer connections.",
                          "server limit": "The server limits connections — PyDM remembers "
                                          "this for next time."}.get(d.tuning, ""))
         if len(d.sources) > 1:

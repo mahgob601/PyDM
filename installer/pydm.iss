@@ -14,6 +14,9 @@
 #ifndef FfmpegDir
   #define FfmpegDir "..\build\ffmpeg"
 #endif
+#ifndef DenoDir
+  #define DenoDir "..\build\deno"
+#endif
 #ifndef OutDir
   #define OutDir "..\build\installer"
 #endif
@@ -66,6 +69,8 @@ Type: filesandordirs; Name: "{app}\_internal"
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#FfmpegDir}\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
 Source: "{#FfmpegDir}\LICENSE.txt"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#DenoDir}\deno.exe"; DestDir: "{app}\deno"; Flags: ignoreversion
+Source: "{#DenoDir}\LICENSE.md"; DestDir: "{app}\deno"; Flags: ignoreversion
 Source: "..\extension\*"; DestDir: "{app}\browser-extension"; Excludes: "manifest.firefox.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\extension\manifest.firefox.json"; DestDir: "{app}\browser-extension-firefox"; DestName: "manifest.json"; Flags: ignoreversion
 Source: "..\extension\*"; DestDir: "{app}\browser-extension-firefox"; Excludes: "manifest.json,manifest.firefox.json"; Flags: ignoreversion recursesubdirs createallsubdirs

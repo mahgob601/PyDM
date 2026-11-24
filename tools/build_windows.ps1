@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force $build | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 & $Python -m PyInstaller --noconfirm --clean --windowed --name PyDM `
     --icon (Join-Path $root "installer\pydm.ico") `
-    --collect-submodules pydm --collect-submodules yt_dlp `
+    --collect-submodules pydm --collect-submodules yt_dlp --collect-all yt_dlp_ejs `
     --distpath (Join-Path $build "dist") --workpath (Join-Path $build "work") `
     --specpath $build (Join-Path $root "run.py")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
@@ -61,6 +61,25 @@ if (-not (Test-Path (Join-Path $ff "ffmpeg.exe"))) {
     if (-not $ok) { throw "no ffmpeg build with libmp3lame" }
 }
 
+# --- 2b. Deno: the JavaScript runtime yt-dlp needs for YouTube (checksum-verified) -----------
+$dn = Join-Path $build "deno"
+if (-not (Test-Path (Join-Path $dn "deno.exe"))) {
+    New-Item -ItemType Directory -Force $dn | Out-Null
+    $base = "https://github.com/denoland/deno/releases/latest/download"
+    $zip = Join-Path $build "deno.zip"
+    $sumFile = Join-Path $build "deno.sha256sum"
+    Invoke-WebRequest "$base/deno-x86_64-pc-windows-msvc.zip.sha256sum" -OutFile $sumFile -UseBasicParsing
+    Invoke-WebRequest "$base/deno-x86_64-pc-windows-msvc.zip" -OutFile $zip -UseBasicParsing
+    $m = [regex]::Match((Get-Content $sumFile -Raw), "\b[0-9a-fA-F]{64}\b")
+    if (-not $m.Success) { throw "no checksum in deno .sha256sum" }
+    $got = (Get-FileHash $zip -Algorithm SHA256).Hash
+    if ($got -ne $m.Value.ToUpper()) { throw "deno checksum mismatch: $got vs $($m.Value)" }
+    Expand-Archive $zip $dn -Force
+    $lic = Invoke-WebRequest "https://raw.githubusercontent.com/denoland/deno/main/LICENSE.md" -UseBasicParsing
+    Set-Content (Join-Path $dn "LICENSE.md") $lic.Content
+    Write-Host "== deno: $(& (Join-Path $dn 'deno.exe') --version | Select-Object -First 1)"
+}
+
 # --- 3. Installer ------------------------------------------------------------------------
 $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
           "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -71,7 +90,7 @@ if (-not $iscc) {
               "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $iscc) { throw "Inno Setup not found" }
 }
-& $iscc /Q "/DAppVersion=$version" "/DSourceDir=$build\dist\PyDM" "/DFfmpegDir=$ff" `
+& $iscc /Q "/DAppVersion=$version" "/DSourceDir=$build\dist\PyDM" "/DFfmpegDir=$ff" "/DDenoDir=$dn" `
     "/DOutDir=$build\installer" (Join-Path $root "installer\pydm.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 $setup = Join-Path $build "installer\PyDM-Setup-$version.exe"

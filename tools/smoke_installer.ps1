@@ -32,6 +32,7 @@ $exe = Join-Path $dir "PyDM.exe"
 Check "PyDM.exe installed" (Test-Path $exe)
 Check "bundled ffmpeg installed" (Test-Path (Join-Path $dir "ffmpeg\ffmpeg.exe"))
 Check "ffmpeg license shipped" (Test-Path (Join-Path $dir "ffmpeg\LICENSE.txt"))
+Check "bundled Deno (YouTube) installed" (Test-Path (Join-Path $dir "deno\deno.exe"))
 Check "uninstaller present" (Test-Path (Join-Path $dir "unins000.exe"))
 $chrome = Get-Content (Join-Path $dir "browser-extension\manifest.json") -Raw | ConvertFrom-Json
 Check "Chrome extension folder (MV3)" ($chrome.manifest_version -eq 3)
@@ -66,6 +67,33 @@ $got = Join-Path $out "payload.bin"
 $same = (Test-Path $got) -and ((Get-FileHash $got).Hash -eq (Get-FileHash $payload).Hash)
 Check "installed PyDM.exe downloads a file intact" ($c.ExitCode -eq 0 -and $same) "exit $($c.ExitCode)"
 Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+
+# --- real YouTube through the installed app (GitHub's IPs are sometimes bot-checked: warn only)
+$yt = "https://www.youtube.com/watch?v=jNQXAC9IVRw"          # "Me at the zoo", 19 s
+$env:PYDM_TEST_DENO = Join-Path $dir "deno\deno.exe"
+$res = & $Python -c @"
+import sys, os
+sys.path.insert(0, r'$root')
+from pydm.core import media
+media.js_runtime = lambda: ('deno', os.environ['PYDM_TEST_DENO'])
+try:
+    info = media.resolve('$yt')
+    print('FORMATS', len(info['formats']), max((f.get('height') or 0) for f in info['formats']))
+except Exception as e:
+    print('ERROR', e)
+"@ 2>&1 | Out-String
+if ($res -match "FORMATS (\d+) (\d+)") {
+    Check "YouTube formats found with bundled Deno" ([int]$Matches[1] -ge 3 -and [int]$Matches[2] -ge 240) $res.Trim()
+    $ytOut = Join-Path $tmp "pydm-yt"
+    Remove-Item -Recurse -Force $ytOut -ErrorAction SilentlyContinue
+    $c = RunAndWait $exe @("--cli", $yt, "--video", "-q", "360", "-o", "`"$ytOut`"") 300
+    $file = Get-ChildItem $ytOut -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 100KB } | Select-Object -First 1
+    Check "installed PyDM.exe downloads a YouTube video" ($c.ExitCode -eq 0 -and $file) "exit $($c.ExitCode) $($file.Name) $($file.Length)"
+} elseif ($res -match "confirm you.re not a bot|Sign in to confirm|HTTP Error 429") {
+    Write-Host "WARN YouTube bot-checked this machine; skipped: $($res.Trim())"
+} else {
+    Check "YouTube formats found with bundled Deno" $false $res.Trim()
+}
 
 # --- self-update path: the exact code 'Install now' runs ----------------------------------
 $old = (PyDMProcs)[0]

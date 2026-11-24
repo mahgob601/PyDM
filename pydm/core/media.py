@@ -56,9 +56,34 @@ def ytdlp_available():
         return False
 
 
+def _app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def js_runtime():
+    """JavaScript runtime for yt-dlp (YouTube needs one): bundled Deno first, then PATH."""
+    exe = "deno.exe" if os.name == "nt" else "deno"
+    bundled = os.path.join(_app_dir(), "deno", exe)
+    if os.path.isfile(bundled):
+        return "deno", bundled
+    for name in ("deno", "node", "bun"):
+        p = shutil.which(name)
+        if p:
+            return name, p
+    return None, None
+
+
 def _ydl_opts(headers=None, cookies=None):
     opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
-            "socket_timeout": 20, "extract_flat": False}
+            "socket_timeout": 20, "extract_flat": False,
+            # list what exists; PyDM picks the format itself (avoids "Requested format is
+            # not available" when a site only offers unusual formats)
+            "ignore_no_formats_error": True}
+    name, path = js_runtime()
+    if name:
+        opts["js_runtimes"] = {name: {"path": path}}
     h = dict(headers or {})
     if cookies:
         h["Cookie"] = cookies
@@ -113,7 +138,14 @@ def resolve(page_url, headers=None, cookies=None):
             "url": f["url"], "protocol": proto, "headers": f.get("http_headers") or {},
             "note": f.get("format_note") or ""})
     if not formats:
-        raise MediaError("No downloadable (non-DRM) formats found")
+        if "youtube" in (info.get("extractor_key") or info.get("extractor") or "").lower() \
+                and js_runtime()[0] is None:
+            raise MediaError("YouTube needs a JavaScript runtime that's missing: reinstall "
+                             "PyDM (it ships one), or install Deno from deno.com")
+        if info.get("formats") and all(f.get("has_drm") for f in info["formats"]):
+            raise MediaError("This video is DRM-protected and can't be downloaded")
+        raise MediaError("No downloadable formats found — the site may need you to sign in "
+                         "(open the page in Chrome first, then use the PyDM button there)")
     return {"title": info.get("title") or "video", "page_url": info.get("webpage_url") or page_url,
             "duration": info.get("duration"), "thumbnail": info.get("thumbnail"),
             "extractor": info.get("extractor_key") or "", "formats": formats}
@@ -243,6 +275,9 @@ def run_ytdlp(d):
             "retries": 10, "fragment_retries": 10}
     if ff:
         opts["ffmpeg_location"] = ff
+    name, path = js_runtime()
+    if name:
+        opts["js_runtimes"] = {name: {"path": path}}
     if cont in ("mp4", "mkv", "webm") and m.get("op") != "mp3":
         opts["merge_output_format"] = cont
     if m.get("op") == "mp3":

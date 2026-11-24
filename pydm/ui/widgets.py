@@ -255,6 +255,8 @@ class DownloadDelegate(QStyledItemDelegate):
                 parts.insert(1, "video + audio" if (d.media or {}).get("op") == "merge" else "audio")
             if d.eta is not None:
                 parts.append(f"{human_time(d.eta)} left")
+            elif d.speed < 1024 and done:
+                parts.append("waiting for the server…")
             conns = f"{d.active_connections} connections"
             if d.auto_tune:
                 conns += " (auto)"

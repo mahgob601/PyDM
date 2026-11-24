@@ -10,9 +10,12 @@ ap.add_argument("--max-conns", type=int, default=0, help="concurrent transfers, 
 ap.add_argument("--slow", type=float, default=0, help="fraction of slow connections")
 ap.add_argument("--latency", type=float, default=0, help="ms before each response")
 ap.add_argument("--norange", action="store_true")
+ap.add_argument("--hang", type=int, default=0,
+                help="the first N responses go silent (connection kept open) after 1 MB")
 A = ap.parse_args()
 
 active = 0
+hung = 0
 lock = threading.Lock()
 g_tokens, g_last = 0.0, time.monotonic()
 
@@ -74,7 +77,17 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send_header("Accept-Ranges", "bytes"); self.send_header("ETag", etag)
             self.end_headers()
             rate = 150 if self.slow else A.per_conn
+            global hung
+            with lock:
+                hang = hung < A.hang
+                hung += hang
             with open(p, "rb") as f:
+                if hang:                       # send a little, then nothing, never closing
+                    f.seek(s)
+                    self.wfile.write(f.read(min(1 << 20, e - s + 1)))
+                    self.wfile.flush()
+                    time.sleep(3600)
+                    return
                 if rate <= 0 and A.global_rate <= 0:
                     self.wfile.flush()
                     self.connection.sendfile(f, s, e - s + 1)

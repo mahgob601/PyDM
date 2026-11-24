@@ -46,6 +46,7 @@ RCVBUF = 4 * 1024 * 1024
 HARD_MAX_CONNECTIONS = 64
 AUTO_START = 8
 TUNE_INTERVAL = 1.5
+STALL_SECONDS = 10            # no bytes on any connection this long: reconnect them all
 RUNNING_STATES = ("Connecting", "Downloading", "Verifying", "Extracting", "Merging")
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 _SECRET_HEADERS = {"authorization", "cookie", "proxy-authorization"}
@@ -294,6 +295,16 @@ class HttpConn:
         self.proxy_auth = None
         self.requests = 0
 
+    def abort(self):
+        """Unblock a read stuck on a silent server (called from another thread)."""
+        c = self.conn
+        sock = getattr(c, "sock", None) if c is not None else None
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
     def close(self):
         if self.conn is not None:
             try:
@@ -541,6 +552,7 @@ class Worker:
         self.started = time.monotonic()
         self.restart = False
         self.retire = False
+        self.conn = None
         self.restarts = 0
         self.slow_for = 0.0
         self.buf = bytearray(CHUNK_SIZE)
@@ -619,6 +631,7 @@ class Download:
         self.target = 0
         self.conn_restarts = 0
         self.tuning = ""
+        self.stalls = 0
         self.writer = None
         self.err_transient = False
         self._refreshed_url = False
@@ -672,9 +685,10 @@ class Download:
     @property
     def eta(self):
         tot = self.expected_total
-        if not tot or self.speed <= 0:
+        if not tot or self.speed < 1024:          # stalled or trickling: no meaningful ETA
             return None
-        return max(0, tot - self.downloaded) / self.speed
+        eta = max(0, tot - self.downloaded) / self.speed
+        return eta if eta < 30 * 86400 else None
 
     @property
     def active_connections(self):
@@ -1387,6 +1401,7 @@ class Download:
             now = time.monotonic()
             if now - last_slow >= 1.0:
                 self._replace_slow(now - last_slow)
+                self._watchdog(now)
                 last_slow = now
             if now - last_save > 3:
                 self._save()
@@ -1464,6 +1479,36 @@ class Download:
             limits[w.source.host] = self.target
             self.manager.update_settings({"host_limits": limits})
 
+    def _watchdog(self, now):
+        """Every connection silent: reconnect them all instead of waiting out the socket timeout.
+
+        Some servers and ISPs (or a Wi-Fi drop) leave TCP connections open but send nothing.
+        After STALL_SECONDS with no bytes at all, cut every connection and redial. If that keeps
+        happening, the server is probably punishing many connections: halve them."""
+        wd = self.__dict__.setdefault("_wd", {"bytes": self.downloaded, "t": now, "kicks": 0})
+        if self.downloaded != wd["bytes"]:
+            wd.update(bytes=self.downloaded, t=now)
+            if now - wd.get("kick_t", 0) > 60:
+                wd["kicks"] = 0
+            return
+        if now - wd["t"] < STALL_SECONDS:
+            return
+        with self.lock:
+            ws = [w for w in self.workers if w.alive and w.seg and not w.retire]
+        if not ws:
+            return
+        wd["kicks"] += 1
+        wd.update(t=now, kick_t=now)
+        self.stalls += 1
+        if wd["kicks"] >= 2 and self.target > 1:
+            self.target = max(1, self.target // 2)
+            self._tune.update(done=True, done_at=now)
+            self.tuning = "stalled"
+        for w in ws:
+            w.restart = True
+            if w.conn is not None and hasattr(w.conn, "abort"):
+                w.conn.abort()
+
     def _replace_slow(self, interval):
         if not self._settings().get("replace_slow_connections", True):
             return
@@ -1471,21 +1516,29 @@ class Download:
         with self.lock:
             ws = [w for w in self.workers
                   if w.alive and w.seg and not w.restart and now - w.started > 3]
-            if len(ws) < 3:
+            if len(ws) < 2:
                 return
-            med = statistics.median(w.speed for w in ws)
-            if med < 64 * 1024:
-                return
+            # Reference speed: the median, or, when most connections are dead (median ~0),
+            # the best one. A silent connection next to a working one is never "normal".
+            ref = max(statistics.median(w.speed for w in ws), max(w.speed for w in ws) * 0.5)
+            if ref < 64 * 1024:
+                return                              # everything is slow: the watchdog's job
+            cut = []
             for w in ws:
-                if w.speed < med * 0.3 and w.seg.remaining() > 4 * CHUNK_SIZE:
+                dead = w.speed < 16 * 1024
+                if (w.speed < ref * 0.3 or dead) and w.seg.remaining() > 4 * CHUNK_SIZE:
                     w.slow_for += interval
-                    if w.slow_for >= 2.5 and w.restarts < 4:
+                    if w.slow_for >= (2.0 if dead else 2.5) and (w.restarts < 4 or dead):
                         w.restart = True
                         w.restarts += 1
                         w.slow_for = 0
                         self.conn_restarts += 1
+                        cut.append(w)
                 else:
                     w.slow_for = 0
+        for w in cut:                               # a silent read never returns by itself
+            if w.conn is not None and hasattr(w.conn, "abort"):
+                w.conn.abort()
 
     def _consume(self, n):
         if self.manager:
@@ -1494,6 +1547,7 @@ class Download:
 
     def _worker(self, w):
         conn = ftp.FtpConn(self) if self._is_ftp() else HttpConn(self)
+        w.conn = conn
         seg = None
         try:
             while not self._halted() and not w.retire:
@@ -1514,6 +1568,11 @@ class Download:
                         conn.close()
                         if self._halted():
                             return
+                        if w.restart and not w.retire:        # watchdog cut a silent connection
+                            w.restart = False
+                            self._switch_source(w)
+                            w.started, w.speed = time.monotonic(), 0.0
+                            continue
                         action = self._on_error(w, seg, e, attempts)
                         if action != "retry":
                             return
