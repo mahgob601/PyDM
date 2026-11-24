@@ -48,6 +48,7 @@ jobs:
         run: ./tools/build_windows.ps1
 
       - name: Installer smoke test (install, run, self-update, uninstall)
+        timeout-minutes: 15
         run: ./tools/smoke_installer.ps1
 
       - name: Sign the update manifest

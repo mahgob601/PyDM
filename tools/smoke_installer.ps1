@@ -14,13 +14,19 @@ $fails = @()
 function Check($name, $ok, $info = "") {
     if ($ok) { Write-Host "PASS $name $info" } else { Write-Host "FAIL $name $info"; $script:fails += $name }
 }
+function RunAndWait($file, $argList, $seconds = 300) {
+    # Start-Process -Wait waits for the whole process tree: setup starts PyDM, which never exits.
+    $p = Start-Process $file -ArgumentList $argList -PassThru
+    if (-not $p.WaitForExit($seconds * 1000)) { $p | Stop-Process -Force; throw "$file timed out after ${seconds}s" }
+    return $p
+}
 function PyDMProcs { @(Get-Process PyDM -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir*" }) }
 
 # --- fresh install (per-user, silent) ----------------------------------------------------
 Get-Process PyDM -ErrorAction SilentlyContinue | Stop-Process -Force
 $log1 = Join-Path $tmp "pydm-install.log"
-$p = Start-Process $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
-    "/DIR=`"$dir`"", "/TASKS=startup,desktopicon", "/LOG=`"$log1`"" -Wait -PassThru
+$p = RunAndWait $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER",
+    "/DIR=`"$dir`"", "/TASKS=startup,desktopicon", "/LOG=`"$log1`"")
 Check "installer exits cleanly" ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
 $exe = Join-Path $dir "PyDM.exe"
 Check "PyDM.exe installed" (Test-Path $exe)
@@ -55,7 +61,7 @@ $srv = Start-Process $Python -ArgumentList "-m", "http.server", "$port", "--bind
 Start-Sleep 2
 $out = Join-Path $tmp "pydm-smoke-out"
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
-$c = Start-Process $exe -ArgumentList "--cli", "http://127.0.0.1:$port/payload.bin", "-o", "`"$out`"" -Wait -PassThru
+$c = RunAndWait $exe @("--cli", "http://127.0.0.1:$port/payload.bin", "-o", "`"$out`"") 120
 $got = Join-Path $out "payload.bin"
 $same = (Test-Path $got) -and ((Get-FileHash $got).Hash -eq (Get-FileHash $payload).Hash)
 Check "installed PyDM.exe downloads a file intact" ($c.ExitCode -eq 0 -and $same) "exit $($c.ExitCode)"
@@ -87,7 +93,7 @@ if ($old) {
 # --- uninstall ---------------------------------------------------------------------------
 PyDMProcs | Stop-Process -Force
 Start-Sleep 2
-$u = Start-Process (Join-Path $dir "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+$u = RunAndWait (Join-Path $dir "unins000.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
 $deadline = (Get-Date).AddSeconds(60)
 while ((Test-Path $exe) -and (Get-Date) -lt $deadline) { Start-Sleep 1 }   # uninstaller re-spawns itself
 Start-Sleep 3
