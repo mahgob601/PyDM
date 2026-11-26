@@ -1,4 +1,4 @@
-# PyDM 4.3 — high-speed, secure download manager
+# PyDM 4.4 — high-speed, secure download manager
 
 A download manager in the spirit of Internet Download Manager. It's built for raw speed and adds what IDM lacks:
 
@@ -68,6 +68,15 @@ How v3 gets there:
 - **Fast data path.** Data is read straight into preallocated buffers and written with positional writes (`pwrite`). Sockets use 4 MB receive buffers.
 - **Windows file allocation.** Files are created as NTFS sparse files, so jumping ahead in a big file never stalls on zero-filling.
 - **Connection budget.** A global limit (128 by default) keeps many simultaneous downloads from overwhelming your router.
+
+## New in 4.4
+- **Internet quota guardian.** Set your monthly quota and renewal day (WE, Vodafone, Orange…).
+  PyDM counts this PC's usage (or only its own downloads), shows a daily budget and when you'd run
+  out at this pace, warns at 80%, and pauses downloads at 95%. "Continue anyway" is always one
+  click away. Optional free hours: usage isn't counted, and big downloads can wait for them.
+- **Send to phone.** Any finished file gets a QR code. Scan it and the file downloads straight to
+  your phone over Wi-Fi: no app, no cloud, no mobile data. The link is signed, works for 24 hours
+  and covers only that file. The phone remote also has **Save to phone** buttons.
 
 ## New in 4.3
 - **Instant preview.** Watch or listen while a file downloads. Jump anywhere and PyDM fetches that

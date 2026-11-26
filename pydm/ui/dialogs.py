@@ -7,7 +7,7 @@ import threading
 
 from PySide6.QtCore import QObject, Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QCheckBox, QDoubleSpinBox, QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
                                QStackedWidget, QTimeEdit, QVBoxLayout, QWidget)
@@ -169,6 +169,83 @@ class PairingDialog(Dialog):
         allow = button("Allow", "Primary", "check")
         allow.clicked.connect(self.accept)
         self.add_buttons(deny, allow)
+
+
+class SendToPhoneDialog(Dialog):
+    """QR code for one finished file: scan it and the phone's browser downloads it."""
+
+    def __init__(self, win, d):
+        super().__init__(win, "Send to phone", d.filename, "phone", C["success"])
+        self.win, self.d = win, d
+        self.setMinimumWidth(520)
+        self.holder = QVBoxLayout()
+        self.root.addLayout(self.holder)
+        self.body_w = None
+        close = button("Done", "Primary")
+        close.clicked.connect(self.accept)
+        self.add_buttons(close)
+        self._fill()
+
+    def _fill(self):
+        if self.body_w is not None:                  # rebuild from scratch: no leftovers
+            self.holder.removeWidget(self.body_w)
+            self.body_w.hide()
+            self.body_w.deleteLater()
+        self.body_w = QWidget()
+        self.body = QVBoxLayout(self.body_w)
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.holder.addWidget(self.body_w)
+        QTimer.singleShot(0, self.adjustSize)
+        srv = self.win.remote_srv
+        s = self.win.m.settings
+        if srv is None or not s["remote_lan"]:
+            self.body.addWidget(Banner("info", "Phone access is off. Turn it on to send files "
+                                               "to phones on your Wi-Fi (the same switch as the "
+                                               "phone remote)."))
+            on = button("Turn on phone access", "Primary", "phone")
+            on.clicked.connect(self._turn_on)
+            self.body.addWidget(on, 0, Qt.AlignLeft)
+            return
+        link = srv.file_link(self.d, hours=24)
+        row = QHBoxLayout()
+        qr = QLabel()
+        qr.setFixedSize(200, 200)
+        pm = qr_pixmap(link, 200)
+        if pm:
+            qr.setPixmap(pm)
+        else:
+            qr.setText("Install 'qrcode'\nfor a QR code")
+        row.addWidget(qr)
+        col = QVBoxLayout()
+        size = os.path.getsize(self.d.path) if self.d.path and os.path.exists(self.d.path) else 0
+        col.addWidget(hint(f"Scan with your phone's camera ({human_size(size)}). It downloads "
+                           "straight to the phone over your Wi-Fi — no app, no cloud, no data "
+                           "plan used."))
+        box = QLineEdit(link)
+        box.setReadOnly(True)
+        col.addWidget(box)
+        cp = button("Copy link", "Ghost", "copy", C["muted"])
+        cp.clicked.connect(lambda: QApplication.clipboard().setText(link))
+        col.addWidget(cp, 0, Qt.AlignLeft)
+        col.addWidget(hint("The link works for 24 hours, only on your Wi-Fi, and only for "
+                           "this file."))
+        if remote.firewall_needed() and not remote.firewall_rule_ok(int(s["remote_port"])):
+            col.addWidget(Banner("caution", "Windows Firewall may block your phone."))
+            fw = button("Allow through Windows Firewall", None, "shield")
+            fw.clicked.connect(lambda: remote.request_firewall_rule(int(s["remote_port"])))
+            col.addWidget(fw, 0, Qt.AlignLeft)
+        col.addStretch()
+        row.addLayout(col, 1)
+        self.body.addLayout(row)
+
+    def _turn_on(self):
+        m = self.win.m
+        new = {"remote_enabled": True, "remote_lan": True}
+        if not m.settings["remote_token"]:
+            new["remote_token"] = remote.new_token()
+        m.update_settings(new)
+        self.win.apply_remote()
+        self._fill()
 
 
 # --------------------------------------------------------------------------- new download
@@ -562,6 +639,7 @@ class BatchDialog(Dialog):
 # --------------------------------------------------------------------------- settings
 class SettingsDialog(QDialog):
     PAGES = [("General", "grid"), ("Speed", "zap"), ("Bandwidth", "gauge"),
+             ("Internet quota", "pie"),
              ("Network", "globe"), ("Automation", "refresh"), ("Security", "shield"),
              ("Video", "film"), ("Scheduler", "calendar"), ("Browser", "link"),
              ("Remote & phone", "activity"), ("Updates", "download")]
@@ -687,6 +765,69 @@ class SettingsDialog(QDialog):
         lay.addWidget(self.quiet_kbps, 0, Qt.AlignLeft)
         if not sys.platform.startswith("win"):
             lay.addWidget(hint("Full-screen detection works on Windows."))
+        lay.addStretch()
+
+        # Internet quota
+        p, lay = self._page("Internet quota", "For plans with a monthly limit (WE, Vodafone, "
+                                              "Orange…): PyDM watches it for you.")
+        from ..core import quota as qmod
+        self.q_on = self._toggle(lay, "Watch my internet quota", s["quota_enabled"])
+        g = QGridLayout()
+        g.setHorizontalSpacing(12)
+        g.addWidget(field_label("MONTHLY QUOTA (GB)"), 0, 0)
+        g.addWidget(field_label("RENEWS ON DAY"), 0, 1)
+        g.addWidget(field_label("PAUSE DOWNLOADS AT"), 0, 2)
+        self.q_gb = QDoubleSpinBox()
+        self.q_gb.setRange(1, 100000)
+        self.q_gb.setDecimals(0)
+        self.q_gb.setButtonSymbols(QDoubleSpinBox.NoButtons)
+        self.q_gb.setValue(float(s["quota_gb"]))
+        self.q_day = self._spin(1, 31, s["quota_renew_day"])
+        self.q_stop = self._spin(50, 100, s["quota_stop_percent"])
+        self.q_stop.setSuffix(" %")
+        g.addWidget(self.q_gb, 1, 0)
+        g.addWidget(self.q_day, 1, 1)
+        g.addWidget(self.q_stop, 1, 2)
+        lay.addLayout(g)
+        lay.addWidget(field_label("WHAT COUNTS"))
+        self.q_mode = QComboBox()
+        self.q_mode.addItem("Everything this PC uses (closest to what your ISP counts)", "pc")
+        self.q_mode.addItem("Only PyDM's downloads", "pydm")
+        self.q_mode.setCurrentIndex(0 if s["quota_mode"] == "pc" and qmod.psutil else 1)
+        if not qmod.psutil:
+            self.q_mode.model().item(0).setEnabled(False)
+        lay.addWidget(self.q_mode)
+        lay.addWidget(hint("Your ISP also counts phones and TVs at home, so set what you've "
+                           "already used from their app (click the quota card in the sidebar → "
+                           "Set how much I've used). PyDM warns at 80% and pauses its downloads "
+                           "at the level above — you can always continue anyway."))
+        lay.addSpacing(6)
+        lay.addWidget(field_label("FREE HOURS (OPTIONAL)"))
+        fr = QHBoxLayout()
+        self.q_free = QCheckBox("My plan doesn't count usage from")
+        self.q_free.setObjectName("Box")
+        self.q_free.setChecked(bool(s["quota_free_start"]))
+        self.q_f1 = QTimeEdit(QTime.fromString(s["quota_free_start"] or "02:00", "HH:mm"))
+        self.q_f2 = QTimeEdit(QTime.fromString(s["quota_free_end"] or "08:00", "HH:mm"))
+        for w in (self.q_f1, self.q_f2):
+            w.setDisplayFormat("HH:mm")
+        fr.addWidget(self.q_free)
+        fr.addWidget(self.q_f1)
+        fr.addWidget(QLabel("to"))
+        fr.addWidget(self.q_f2)
+        fr.addStretch()
+        lay.addLayout(fr)
+        br = QHBoxLayout()
+        self.q_big = QCheckBox("Hold downloads bigger than")
+        self.q_big.setObjectName("Box")
+        self.q_big.setChecked(bool(s["quota_big_wait"]))
+        self.q_big_mb = self._spin(10, 1_000_000, s["quota_big_mb"], 100)
+        self.q_big_mb.setSuffix(" MB")
+        br.addWidget(self.q_big)
+        br.addWidget(self.q_big_mb)
+        br.addWidget(QLabel("for the free hours"))
+        br.addStretch()
+        lay.addLayout(br)
         lay.addStretch()
 
         # Network
@@ -1193,6 +1334,15 @@ class SettingsDialog(QDialog):
             "ntfy_server": self.ntfy_server.text().strip() or "https://ntfy.sh",
             "ntfy_topic": self.ntfy_topic.text().strip(),
             "share_enabled": self.share_on.isChecked(), "share_topic": self.share_topic,
+            "quota_enabled": self.q_on.isChecked(), "quota_gb": self.q_gb.value(),
+            "quota_renew_day": self.q_day.value(), "quota_stop_percent": self.q_stop.value(),
+            "quota_mode": self.q_mode.currentData(),
+            "quota_free_start": self.q_f1.time().toString("HH:mm") if self.q_free.isChecked()
+            else "",
+            "quota_free_end": self.q_f2.time().toString("HH:mm") if self.q_free.isChecked()
+            else "",
+            "quota_big_wait": self.q_big.isChecked() and self.q_free.isChecked(),
+            "quota_big_mb": self.q_big_mb.value(),
             "check_updates": self.upd_on.isChecked(), "update_url": self.upd_url.text().strip(),
             "update_public_key": self.upd_key.text().strip(),
             "notifications": self.notify.isChecked(), "monitor_clipboard": self.clip.isChecked(),

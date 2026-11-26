@@ -109,6 +109,15 @@ DEFAULT_SETTINGS = {
     "ntfy_enabled": False,
     "ntfy_server": "https://ntfy.sh",
     "ntfy_topic": "",
+    "quota_enabled": False,          # internet quota guardian
+    "quota_gb": 140,
+    "quota_renew_day": 1,
+    "quota_mode": "pc",              # "pc": everything this PC uses; "pydm": downloads only
+    "quota_stop_percent": 95,
+    "quota_free_start": "",          # free hours window, e.g. "02:00"–"08:00"
+    "quota_free_end": "",
+    "quota_big_wait": False,         # hold big downloads for the free hours
+    "quota_big_mb": 500,
     "share_enabled": False,          # receive links shared from the phone (ntfy inbox topic)
     "share_topic": "",
     "share_since": "",
@@ -1366,6 +1375,13 @@ class Download:
         self.segments.sort(key=lambda s: s.start)
         return new
 
+    def _count(self, n):
+        """Bytes received, for the quota guardian (manager-wide)."""
+        m = self.manager
+        if m is not None:
+            with m.count_lock:
+                m.bytes_in += n
+
     # ------------------------------------------------------------------ instant preview
     def available_from(self, off):
         """How many bytes from `off` are already on disk, contiguously."""
@@ -1763,6 +1779,7 @@ class Download:
                     self._window += n
                     w.window += n
                     src.bytes += n
+                    self._count(n)
             if interrupted or r.length:                # unread bytes: connection not reusable
                 conn.close()
             with self.lock:
@@ -1791,6 +1808,7 @@ class Download:
                 with self.lock:
                     seg.done += n
                     self._window += n
+                    self._count(n)
                 self._tick_speed()
         if self.stop_event.is_set():
             return
@@ -1812,14 +1830,22 @@ class Manager:
         self._save_lock = threading.Lock()
         self.limiter = RateLimiter()
         self.events = queue.Queue()
+        self.bytes_in = 0                  # everything PyDM received (quota guardian)
+        self.count_lock = threading.Lock()
         self._sched_fired = {}
         self._was_busy = False
         self.history = None
+        self.quota = None
         if persist:
             os.makedirs(APP_DIR, exist_ok=True)
             if os.name == "posix":
                 os.chmod(APP_DIR, 0o700)
             self._load()
+            try:
+                from .quota import Quota
+                self.quota = Quota(self, os.path.join(APP_DIR, "quota.json"))
+            except Exception:  # noqa: BLE001
+                self.quota = None
             try:
                 from .history import History
                 self.history = History()
@@ -2163,6 +2189,36 @@ class Manager:
         now = time.time()
         hold = (self.settings["scheduler_enabled"] and self.settings["scheduler_window_only"]
                 and not self.in_schedule_window())
+        q = self.quota
+        if q is not None:
+            quota_hold = q.tick()
+            for ev in q.events:
+                self.events.put(("quota", ev))
+            q.events.clear()
+            if quota_hold:
+                hold = True
+                for d in self.visible():           # protect what's left: pause, don't lose
+                    if (d.is_running() or d.status == "Queued") and d.source != "update":
+                        d.quota_paused = True
+                        self.pause(d)
+            else:
+                for d in self.visible():           # allowed again: carry on where they were
+                    if getattr(d, "quota_paused", False) and not d.is_running():
+                        d.quota_paused = False
+                        if d.status == "Paused":
+                            self.resume(d)
+            for d in self.visible():
+                waiting = getattr(d, "waits_free", False)
+                if d.is_running() and not waiting and d.total and q.big_waits(d):
+                    d.waits_free = True            # size just became known: it's a big one
+                    self.pause(d)
+                    self.events.put(("quota", ("info", "Big download waits for your free hours",
+                                               f"{d.filename} starts at "
+                                               f"{self.settings['quota_free_start']}.")))
+                elif waiting and not d.is_running() and not q.big_waits(d):
+                    d.waits_free = False           # free hours started (or the rule was off)
+                    if d.status == "Paused":
+                        self.resume(d)
         with self.lock:
             for d in self.downloads:
                 if d.parent_id:
@@ -2177,6 +2233,8 @@ class Manager:
                     if running >= int(self.settings["max_active"]):
                         break
                     if d.status == "Queued" and not d.is_running() and not d.parent_id:
+                        if q is not None and q.big_waits(d):
+                            continue                   # big one: waits for free hours
                         d.start()
                         running += 1
             queued = any(d.status == "Queued" or (d.status == "Error" and d.retry_at)

@@ -8,8 +8,12 @@ Security
   * strict Content-Security-Policy, no CORS, clickjacking protection, body size limits
   * only http(s)/ftp(s) URLs can be added; downloads always go to the configured folder
 """
+import hashlib
 import hmac
 import json
+import os
+import re
+import urllib.parse
 import secrets
 import socket
 import sys
@@ -18,6 +22,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .log import log
 from .util import APP_NAME, VERSION, human_size, human_time, is_http_url
 
 MAX_FAILS = 8
@@ -89,6 +94,12 @@ def _download_json(d):
             "kind": d.kind}
 
 
+def sendable(d):
+    """Finished, still on disk, and not flagged as dangerous."""
+    return (d.status == "Completed" and d.path and os.path.isfile(d.path) and
+            (d.security or {}).get("level") != "danger")
+
+
 class RemoteServer:
     def __init__(self, manager, port, lan=True, token=None):
         self.m = manager
@@ -102,6 +113,28 @@ class RemoteServer:
     def url(self):
         host = lan_ip() if self.lan else "127.0.0.1"
         return f"http://{host}:{self.port}/#t={self.token}"
+
+    # ---- send to phone: signed, expiring per-file links (no app or login on the phone)
+    def _sig(self, did, exp):
+        return hmac.new(self.token.encode(), f"file:{did}:{exp}".encode(),
+                        hashlib.sha256).hexdigest()[:40]
+
+    def file_path(self, d, hours=24):
+        exp = int(time.time() + hours * 3600)
+        name = urllib.parse.quote(os.path.basename(d.path or d.filename or "file"))
+        return f"/f/{d.id}/{name}?e={exp}&s={self._sig(d.id, exp)}"
+
+    def file_link(self, d, hours=24):
+        host = lan_ip() if self.lan else "127.0.0.1"
+        return f"http://{host}:{self.port}{self.file_path(d, hours)}"
+
+    def check_file(self, did, exp, sig):
+        try:
+            exp = int(exp)
+        except (TypeError, ValueError):
+            return False
+        return exp > time.time() and bool(sig) and hmac.compare_digest(
+            sig.encode(), self._sig(did, exp).encode())
 
     def _locked(self, ip):
         with self._lock:
@@ -171,7 +204,81 @@ class RemoteServer:
                 except ValueError:
                     return None
 
+            def _send_file(self, d, head=False):
+                size = os.path.getsize(d.path)
+                rng = self.headers.get("Range", "")
+                start, end, partial = 0, size - 1, False
+                m = re.match(r"bytes=(\d*)-(\d*)$", rng.strip())
+                if m and (m[1] or m[2]):
+                    if m[1]:
+                        start = int(m[1])
+                        end = min(int(m[2]), size - 1) if m[2] else size - 1
+                    else:
+                        start = max(0, size - int(m[2]))
+                    partial = True
+                    if start > end:
+                        self.send_response(416)
+                        self.send_header("Content-Range", f"bytes */{size}")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                name = os.path.basename(d.path)
+                ascii_name = name.encode("ascii", "replace").decode().replace('"', "'")
+                self.send_response(206 if partial else 200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(end - start + 1))
+                self.send_header("Accept-Ranges", "bytes")
+                if partial:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Disposition", f'attachment; filename="{ascii_name}"; '
+                                 f"filename*=UTF-8''{urllib.parse.quote(name)}")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                if head:
+                    return
+                log.info("sent %s to %s (%s)", name, self.client_address[0],
+                         human_size(end - start + 1))
+                with open(d.path, "rb") as f:
+                    f.seek(start)
+                    left = end - start + 1
+                    try:
+                        while left > 0:
+                            chunk = f.read(min(1 << 20, left))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            left -= len(chunk)
+                    except (ConnectionError, OSError):
+                        pass
+
+            def _file_route(self, head=False):
+                ip = self.client_address[0]
+                if srv._locked(ip):
+                    return self._send(429, {"error": "Too many attempts. Try again later."})
+                u = urllib.parse.urlsplit(self.path)
+                parts = u.path.split("/")             # "", "f", id, name
+                q = urllib.parse.parse_qs(u.query)
+                did = parts[2] if len(parts) > 3 else ""
+                if not srv.check_file(did, (q.get("e") or [""])[0], (q.get("s") or [""])[0]):
+                    srv._fail(ip)
+                    return self._send(403, "This link expired or isn't valid. Send it again "
+                                           "from PyDM.", "text/plain; charset=utf-8")
+                d = srv.m.get(did)
+                if d is None or not sendable(d):
+                    return self._send(404, "That file isn't available any more.",
+                                      "text/plain; charset=utf-8")
+                self._send_file(d, head)
+
+            def do_HEAD(self):
+                if self.path.startswith("/f/"):
+                    return self._file_route(head=True)
+                self._send(405, {"error": "method not allowed"})
+
             def do_GET(self):
+                if self.path.startswith("/f/"):
+                    return self._file_route()
                 path = self.path.split("?")[0]
                 if path == "/":
                     return self._send(200, PAGE, "text/html; charset=utf-8")
@@ -182,7 +289,12 @@ class RemoteServer:
                 if path == "/api/downloads":
                     if not self._auth():
                         return
-                    items = [_download_json(d) for d in srv.m.visible()]
+                    items = []
+                    for d in srv.m.visible():
+                        j = _download_json(d)
+                        if sendable(d):
+                            j["save"] = srv.file_path(d, hours=6)
+                        items.append(j)
                     speed = sum(d.speed for d in srv.m.visible() if d.is_running())
                     return self._send(200, {"app": APP_NAME, "version": VERSION,
                                             "speed": human_size(speed) + "/s",
@@ -268,6 +380,8 @@ margin:4px 0 8px}.track{height:6px;background:#222837;border-radius:3px;overflow
 .fill{height:100%;background:linear-gradient(90deg,#7c6cff,#43c6f0)}.done .fill{background:#22c55e}
 .err .fill{background:#f43f5e}.acts{display:flex;gap:6px;margin-top:10px}.acts button{flex:1;
 padding:8px;font-size:13px;background:#1b2030;border:1px solid #2c3346;color:#cfd5e2}
+.acts a.save{flex:2;text-align:center;padding:8px;font-size:13px;font-weight:650;color:#fff;
+text-decoration:none;border-radius:12px;background:linear-gradient(90deg,#22c55e,#16a34a)}
 #msg{background:#1b2030;border:1px solid #2c3346;border-radius:12px;padding:10px 12px}
 .empty{color:#8b94a9;text-align:center;margin-top:40px}"""
 
@@ -305,6 +419,8 @@ function render(data) {
     const btn = (txt, action) => { const b = el("button", "", txt); b.onclick = () => api("/api/action", {id: d.id, action}).then(load).catch(e => say(e.message)); acts.append(b); };
     if (["Downloading","Queued","Connecting"].includes(d.status)) btn("Pause", "pause");
     if (["Paused","Error"].includes(d.status)) btn("Resume", "resume");
+    if (d.save) { const a = el("a", "save", "Save to phone"); a.href = d.save;
+      a.setAttribute("download", ""); acts.prepend(a); }
     btn("Remove", "remove"); c.append(acts); list.append(c);
   }
 }
