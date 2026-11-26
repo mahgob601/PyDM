@@ -8,7 +8,7 @@ from .core.util import APP_DIR, APP_NAME, VERSION, human_size, human_time
 
 
 def run_cli(url, out_dir, connections, name, checksum, mirrors=None, sequential=False,
-            extract=False, video=False, quality=None):
+            extract=False, video=False, quality=None, clip=None):
     from .core.engine import Manager
     from .core.power import SleepInhibitor
     m = Manager(persist=False)
@@ -19,7 +19,16 @@ def run_cli(url, out_dir, connections, name, checksum, mirrors=None, sequential=
         algo, _, value = checksum.partition(":")
         algo_value = (algo.lower().replace("-", ""), value.lower())
     low = url.lower().split("?")[0]
-    if video or low.endswith(".m3u8"):
+    if clip:
+        from .core import media
+        try:
+            start, end = media.check_clip(media.parse_time(clip[0]), media.parse_time(clip[1]))
+            d = m.add_clip(url, os.path.splitext(name)[0] if name else "clip", start, end,
+                           height=quality, save_dir=out_dir, source="cli")
+        except media.MediaError as e:
+            print(e)
+            return 1
+    elif video or low.endswith(".m3u8"):
         from .core import media
         if low.endswith(".m3u8"):
             d = m.add_stream(url, title=os.path.splitext(name or "video")[0], height=quality,
@@ -162,6 +171,20 @@ def main():
             stream.reconfigure(errors="replace")
         except (AttributeError, ValueError):
             pass
+    try:
+        from .core.log import log, setup
+        setup()
+        import threading
+
+        def _crash(t, v, tb):
+            log.critical("unhandled error", exc_info=(t, v, tb))
+            sys.__excepthook__(t, v, tb)
+        sys.excepthook = _crash
+        threading.excepthook = lambda a: log.critical(
+            "unhandled error in %s", a.thread.name if a.thread else "thread",
+            exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    except OSError:
+        pass                                     # read-only profile: run without a log
     ap = argparse.ArgumentParser(prog="pydm", description=f"{APP_NAME} {VERSION} — "
                                                           "multi-connection download manager")
     ap.add_argument("--cli", metavar="URL", help="download URL in the terminal (no GUI)")
@@ -174,6 +197,9 @@ def main():
     ap.add_argument("-v", "--video", action="store_true",
                     help="treat URL as a video page (YouTube etc.; needs yt-dlp)")
     ap.add_argument("-q", "--quality", type=int, help="max video height, e.g. 1080")
+    ap.add_argument("--from", dest="clip_from", metavar="TIME",
+                    help="only download a video from this time (12:30, 1:02:03 or seconds)")
+    ap.add_argument("--to", dest="clip_to", metavar="TIME", help="...until this time")
     ap.add_argument("-o", "--output", default=os.getcwd(), help="output folder (CLI)")
     ap.add_argument("-n", "--name", help="output file name (CLI)")
     ap.add_argument("--checksum", help="verify, e.g. sha256:abc123… (CLI)")
@@ -182,5 +208,6 @@ def main():
     if args.cli:
         sys.exit(run_cli(args.cli, args.output, max(0, min(64, args.connections)), args.name,
                          args.checksum, args.mirror, args.stream, args.extract, args.video,
-                         args.quality))
+                         args.quality, (args.clip_from, args.clip_to)
+                         if args.clip_from or args.clip_to else None))
     sys.exit(run_gui(args.hidden))

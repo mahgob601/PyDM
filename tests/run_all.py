@@ -36,6 +36,7 @@ SERVERS = {          # name: (root, extra args) — ports assigned at start
     "raw": ("srv", []),
     "hang": ("srv", ["--per-conn", "3000", "--hang", "5"]),        # probe + all 4 go silent
     "hang_some": ("srv", ["--per-conn", "3000", "--hang", "3"]),   # probe + 2 of 4 go silent
+    "solo": ("srv", ["--per-conn", "4000", "--solo"]),             # punishes parallel conns
     "vid": ("vid", ["--per-conn", "1500", "--latency", "20"]),
     "vid_slow": ("vid", ["--per-conn", "250"]),
 }

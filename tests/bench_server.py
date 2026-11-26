@@ -1,6 +1,6 @@
 """Realistic test server: keep-alive, Range, ETag/If-Range, per-connection and global
 throttling, connection limit (503), latency, and a share of randomly slow connections."""
-import argparse, http.server, os, random, re, threading, time
+import argparse, http.server, os, random, re, socket, threading, time
 
 ap = argparse.ArgumentParser()
 ap.add_argument("root"); ap.add_argument("port", type=int)
@@ -10,6 +10,9 @@ ap.add_argument("--max-conns", type=int, default=0, help="concurrent transfers, 
 ap.add_argument("--slow", type=float, default=0, help="fraction of slow connections")
 ap.add_argument("--latency", type=float, default=0, help="ms before each response")
 ap.add_argument("--norange", action="store_true")
+ap.add_argument("--solo", action="store_true",
+                help="punish parallel downloads: with another range transfer running, "
+                     "send 256 KB and go silent")
 ap.add_argument("--hang", type=int, default=0,
                 help="the first N responses go silent (connection kept open) after 1 MB")
 A = ap.parse_args()
@@ -81,12 +84,23 @@ class H(http.server.BaseHTTPRequestHandler):
             with lock:
                 hang = hung < A.hang
                 hung += hang
+                if A.solo and active > 1:
+                    hang = True
             with open(p, "rb") as f:
                 if hang:                       # send a little, then nothing, never closing
                     f.seek(s)
-                    self.wfile.write(f.read(min(1 << 20, e - s + 1)))
+                    self.wfile.write(f.read(min((256 << 10) if A.solo else (1 << 20), e - s + 1)))
                     self.wfile.flush()
-                    time.sleep(3600)
+                    self.connection.settimeout(0.5)
+                    t_end = time.time() + 3600
+                    while time.time() < t_end:            # silent until the client hangs up
+                        try:
+                            if self.connection.recv(1, socket.MSG_PEEK) == b"":
+                                break
+                        except socket.timeout:
+                            continue
+                        except OSError:
+                            break
                     return
                 if rate <= 0 and A.global_rate <= 0:
                     self.wfile.flush()

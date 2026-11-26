@@ -265,6 +265,42 @@ def find_format(info, fmt_id):
     return next((f for f in info["formats"] if f["id"] == fmt_id), None)
 
 
+def parse_time(text):
+    """'90', '1:30', '01:02:03', '1h2m3s', '2m' → seconds (float). None if empty."""
+    t = (text or "").strip().lower()
+    if not t:
+        return None
+    if re.fullmatch(r"\d+(\.\d+)?", t):
+        return float(t)
+    if re.fullmatch(r"\d+(:\d{1,2}){1,2}(\.\d+)?", t):
+        secs = 0.0
+        for part in t.split(":"):
+            secs = secs * 60 + float(part)
+        return secs
+    m = re.fullmatch(r"(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+(?:\.\d+)?)s)?", t)
+    if m and any(m.groups()):
+        h, mi, s = m.groups()
+        return int(h or 0) * 3600 + int(mi or 0) * 60 + float(s or 0)
+    raise MediaError(f"Couldn't read the time “{text}” — use 1:30, 01:02:03 or 90")
+
+
+def fmt_clock(secs):
+    secs = int(round(secs))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def check_clip(start, end, duration=None):
+    if start is None or end is None:
+        raise MediaError("Enter both a start and an end time")
+    if end <= start:
+        raise MediaError("The end time must be after the start time")
+    if duration and start >= duration:
+        raise MediaError(f"The video is only {fmt_clock(duration)} long")
+    return start, min(end, duration) if duration else end
+
+
 def run_ytdlp(d):
     """Let yt-dlp download formats our engine can't fetch directly (DASH fragments, etc.).
     Returns the final file path, or None when paused."""
@@ -304,6 +340,12 @@ def run_ytdlp(d):
     name, path = js_runtime()
     if name:
         opts["js_runtimes"] = {name: {"path": path}}
+    clip = m.get("clip")
+    if clip:                                   # only this part: fetched, not trimmed later
+        if not ff:
+            raise MediaError("Downloading part of a video needs ffmpeg")
+        opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [tuple(clip)])
+        opts["force_keyframes_at_cuts"] = bool(m.get("exact"))
     if cont in ("mp4", "mkv", "webm") and m.get("op") != "mp3":
         opts["merge_output_format"] = cont
     if m.get("op") == "mp3":

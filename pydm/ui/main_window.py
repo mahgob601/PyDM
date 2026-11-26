@@ -13,9 +13,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGridLay
 
 import threading
 
-from ..core import notify, remote, security, updater
+from ..core import inbox, notify, remote, security, updater
+from ..core.log import log
+from ..core.preview import PreviewServer, can_preview
 from ..core.power import SleepInhibitor
-from ..core.util import (APP_NAME, CATEGORY_ORDER, DOWNLOAD_EXTS, VERSION, ext_of, human_size,
+from ..core.util import (APP_NAME, CATEGORY_ORDER, DOWNLOAD_EXTS, VERSION, describe_error, ext_of,
+                         human_size,
                          human_time, is_http_url, open_path, reveal_in_folder)
 from .dialogs import (BatchDialog, ConfirmDialog, NewDownloadDialog, PairingDialog,
                       SettingsDialog, button)
@@ -294,10 +297,15 @@ class DetailsPanel(QFrame):
         self.refresh.clicked.connect(lambda: self.win.refresh_address(self.d))
         self.remove = button("Remove", "Danger", "trash", "#fda4af")
         self.remove.clicked.connect(lambda: self.win.remove([self.d]))
+        self.preview = button("Preview now — play while it downloads", None, "play")
+        self.preview.setToolTip("Watch or listen right away. Jump anywhere: PyDM downloads "
+                                "that part first.")
+        self.preview.clicked.connect(lambda: self.win.preview(self.d))
         acts.addWidget(self.primary, 0, 0, 1, 2)
-        acts.addWidget(self.folder, 1, 0)
-        acts.addWidget(self.refresh, 1, 1)
-        acts.addWidget(self.remove, 2, 0, 1, 2)
+        acts.addWidget(self.preview, 1, 0, 1, 2)
+        acts.addWidget(self.folder, 2, 0)
+        acts.addWidget(self.refresh, 2, 1)
+        acts.addWidget(self.remove, 3, 0, 1, 2)
         lay.addLayout(acts)
         lay.addStretch()
         scroll.setWidget(body)
@@ -389,6 +397,7 @@ class DetailsPanel(QFrame):
                                  ("Retry now" if d.retry_at else "Retry"))
             self.primary.setIcon(icon("play", "white", 16))
         self.primary.setEnabled(d.status != "Verifying")
+        self.preview.setVisible(can_preview(d) and d.status != "Completed")
         self.refresh.setEnabled(d.status in ("Paused", "Error") and not d.is_running())
         self._update_security(d)
 
@@ -413,6 +422,8 @@ class DetailsPanel(QFrame):
                          "max": "Using the maximum number of connections.",
                          "stalled": "The server stopped sending data, so PyDM reconnected with "
                                     "fewer connections.",
+                         "backoff": "The server keeps going silent with several connections, "
+                                    "so PyDM switched to one connection, like a browser.",
                          "server limit": "The server limits connections — PyDM remembers "
                                          "this for next time."}.get(d.tuning, ""))
         if len(d.sources) > 1:
@@ -513,6 +524,8 @@ class MainWindow(QMainWindow):
         self.sleep = SleepInhibitor()
         self.remote_srv = None
         self._update_found = None
+        self.previewer = None
+        self.remote_state = ("off", "")
         self.setWindowTitle(f"{APP_NAME}")
         self.setWindowIcon(app_icon())
         self.resize(1320, 800)
@@ -554,6 +567,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.tick)
         self.timer.start()
         self.apply_remote()
+        self.apply_share()
         if self.m.settings["check_updates"]:
             QTimer.singleShot(4000, self.check_updates)
         self.tick()
@@ -997,6 +1011,26 @@ class MainWindow(QMainWindow):
                               self.m.opener)
 
     # ------------------------------------------------------------------ remote & updates
+    def apply_share(self):
+        """Listen for links shared from the phone (ntfy inbox topic)."""
+        s = self.m.settings
+        want = (s["share_enabled"], s["share_topic"], s["ntfy_server"])
+        if getattr(self, "_share_cfg", None) == want:
+            return
+        self._share_cfg = want
+        if getattr(self, "inbox", None):
+            self.inbox.stop()
+            self.inbox = None
+        if not (s["share_enabled"] and s["share_topic"]):
+            return
+        try:
+            self.inbox = inbox.Inbox(self.m, s["ntfy_server"], s["share_topic"],
+                                     s.get("share_since", ""), opener=self.m.opener)
+            self.inbox.start()
+        except ValueError as e:
+            self.inbox = None
+            self.toasts.show("Phone sharing is off", str(e), "caution")
+
     def apply_remote(self):
         s = self.m.settings
         want = (s["remote_enabled"], s["remote_lan"], s["remote_port"], s["remote_token"])
@@ -1006,6 +1040,7 @@ class MainWindow(QMainWindow):
             self.remote_srv.stop()
             self.remote_srv = None
         self._remote_cfg = want
+        self.remote_state = ("off", "")
         if not s["remote_enabled"]:
             return
         if not s["remote_token"]:
@@ -1016,8 +1051,13 @@ class MainWindow(QMainWindow):
             self.remote_srv.start()
         except OSError as e:
             self.remote_srv = None
-            self.toasts.show("Remote control couldn't start", str(e), "caution")
+            self.remote_state = ("error", describe_error(e))
+            log.error("remote control couldn't start on port %s: %s", s["remote_port"], e)
+            self.toasts.show("Remote control couldn't start", describe_error(e), "caution")
             return
+        self.remote_state = ("running", "")
+        log.info("remote control on port %s (%s)", s["remote_port"],
+                 "Wi-Fi" if s["remote_lan"] else "this PC only")
         port = int(s["remote_port"])
         if s["remote_lan"] and not remote.firewall_rule_ok(port):
             self.toasts.show("Let your phone reach PyDM",
@@ -1043,12 +1083,17 @@ class MainWindow(QMainWindow):
                 self._update_found = man
         threading.Thread(target=work, daemon=True).start()
 
+    def start_update(self, man):
+        """Download a verified update; _update_ready offers to install it when done."""
+        log.info("downloading update %s", man["version"])
+        d = self.m.add(man["url"], checksum=("sha256", man["sha256"]), source="update",
+                       save_dir=os.path.join(os.path.expanduser("~"), ".pydm", "updates"))
+        self.toasts.show("Downloading update", f"PyDM {man['version']} — you'll be asked to "
+                                               "install it when it's ready.", "info")
+        return d
+
     def _offer_update(self, man):
-        def get():
-            d = self.m.add(man["url"], checksum=("sha256", man["sha256"]), source="update",
-                           save_dir=os.path.join(os.path.expanduser("~"), ".pydm", "updates"))
-            self.toasts.show("Downloading update", f"PyDM {man['version']}", "info")
-            return d
+        get = lambda: self.start_update(man)  # noqa: E731
         self.toasts.show(f"PyDM {man['version']} is available", man.get("notes", "")[:140],
                          "info", [("Download update", get), ("Later", lambda: None)])
 
@@ -1134,6 +1179,7 @@ class MainWindow(QMainWindow):
     def open_settings(self):
         SettingsDialog(self, self.m, self.bridge, self.bridge_error).exec()
         self.apply_remote()
+        self.apply_share()
         self.tick()
 
     def open_video(self, url=""):
@@ -1193,6 +1239,19 @@ class MainWindow(QMainWindow):
     def _delete_key(self):
         if self.list.hasFocus():
             self.remove(self.selected())
+
+    def preview(self, d):
+        if self.previewer is None:
+            self.previewer = PreviewServer(self.m)
+        try:
+            how = self.previewer.open(d)
+        except OSError as e:
+            self.toasts.show("Couldn't start the preview", describe_error(e), "caution")
+            return
+        log.info("preview %s in %s", d.filename, how)
+        self.toasts.show("Preview started", "Opened in VLC." if how == "vlc" else
+                         "Opened in your browser. Jump anywhere — PyDM fetches that part "
+                         "first.", "info")
 
     def open_file(self, d):
         if not d or d.status != "Completed" or not d.path or not os.path.exists(d.path):
@@ -1284,6 +1343,8 @@ class MainWindow(QMainWindow):
             a.setEnabled(enabled)
             a.triggered.connect(cb)
         add("Open", "external", lambda: self.open_file(d), d.status == "Completed")
+        if can_preview(d) and d.status != "Completed":
+            add("Preview now (play while downloading)", "play", lambda: self.preview(d))
         add("Show in folder", "folder", lambda: self.reveal(d))
         if d.extracted_to:
             add("Open extracted folder", "archive", lambda: reveal_in_folder(d.extracted_to))

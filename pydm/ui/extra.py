@@ -6,7 +6,7 @@ import urllib.parse
 
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSpinBox,
                                QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget, QAbstractItemView)
@@ -74,6 +74,31 @@ class VideoDialog(Dialog):
         self.name = QLineEdit(title or "")
         self.name.setPlaceholderText("Uses the video title")
         self.root.addWidget(self.name)
+        crow = QHBoxLayout()
+        self.clip_on = QCheckBox("Only download part:")
+        self.clip_on.setObjectName("Box")
+        self.clip_from = QLineEdit()
+        self.clip_from.setPlaceholderText("from 12:30")
+        self.clip_to = QLineEdit()
+        self.clip_to.setPlaceholderText("to 15:00")
+        self.clip_exact = QCheckBox("Exact cut (slower)")
+        self.clip_exact.setObjectName("Box")
+        self.clip_exact.setToolTip("Re-encodes the edges so the clip starts and ends on the exact "
+                                   "frame. Without it, cuts land on the nearest keyframe "
+                                   "(usually within 2 seconds) and it's much faster.")
+        for w in (self.clip_from, self.clip_to, self.clip_exact):
+            w.setEnabled(False)
+            self.clip_on.toggled.connect(w.setEnabled)
+        for w in (self.clip_from, self.clip_to):
+            w.setFixedWidth(110)
+            w.textEdited.connect(lambda *_: self.clip_on.setChecked(True))
+        crow.addWidget(self.clip_on)
+        crow.addWidget(self.clip_from)
+        crow.addWidget(QLabel("→"))
+        crow.addWidget(self.clip_to)
+        crow.addWidget(self.clip_exact)
+        crow.addStretch()
+        self.root.addLayout(crow)
         self.tools = QVBoxLayout()
         self.root.addLayout(self.tools)
         if not media.ytdlp_available():
@@ -188,6 +213,27 @@ class VideoDialog(Dialog):
         f = self.options[it.data(Qt.UserRole)]
         title = self.name.text().strip() or f.get("title") or self.page_title or "video"
         try:
+            if self.clip_on.isChecked():
+                info = f.get("info") or {}
+                start_s, end_s = media.check_clip(media.parse_time(self.clip_from.text()),
+                                                  media.parse_time(self.clip_to.text()),
+                                                  info.get("duration"))
+                if f["src"] == "site":
+                    opt = f["option"]
+                    ids = [x["id"] for x in (opt.get("video"), opt.get("audio")) if x]
+                    url = info.get("page_url") or self.url.text().strip()
+                    self.m.add_clip(url, title, start_s, end_s, fmt="+".join(ids) or None,
+                                    height=opt.get("height"), container=opt["container"]
+                                    if opt["kind"] != "mp3" else "mp4",
+                                    mp3=opt["kind"] == "mp3", exact=self.clip_exact.isChecked(),
+                                    referrer=self.referrer, cookies=self.cookies,
+                                    start_now=start, source=self.source)
+                else:
+                    self.m.add_clip(f["url"], title, start_s, end_s, height=f.get("height"),
+                                    exact=self.clip_exact.isChecked(), referrer=self.referrer,
+                                    cookies=self.cookies, start_now=start, source=self.source)
+                self.accept()
+                return
             if f["src"] == "site":
                 info = dict(f["info"], title=title)
                 self.m.add_media(info, f["option"], start=start, referrer=self.referrer,

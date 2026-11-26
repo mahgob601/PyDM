@@ -190,6 +190,14 @@ QCheckBox::indicator {{ width: 34px; height: 19px; border-radius: 10px;
 QCheckBox::indicator:checked {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
     stop:0 {C['accent']}, stop:1 #5b8cff); }}
 QCheckBox::indicator:disabled {{ background: {C['border']}; }}
+QCheckBox#Box {{ spacing: 8px; }}
+QCheckBox#Box::indicator {{ width: 16px; height: 16px; border-radius: 5px;
+    border: 1px solid {C['border2']}; background: {C['card']}; }}
+QCheckBox#Box::indicator:hover {{ border-color: {C['accent']}; }}
+QCheckBox#Box::indicator:checked {{ background: {C['accent']}; border-color: {C['accent']};
+    image: url(none); }}
+QCheckBox#Box::indicator:disabled {{ background: {C['panel']}; border-color: {C['border']}; }}
+QCheckBox#Box:disabled {{ color: {C['faint']}; }}
 QRadioButton {{ background: transparent; spacing: 8px; }}
 
 QListView#Downloads {{ background: transparent; border: none; }}

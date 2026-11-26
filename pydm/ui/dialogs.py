@@ -14,9 +14,10 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QF
 
 from ..core import security
 from ..core.engine import DEFAULT_SETTINGS, parse_headers, probe_url
-from ..core import media, notify, remote, updater
+from ..core import inbox, media, notify, remote, updater
+from ..core.log import diagnostics, log_dir
 from ..core.util import (category_for, describe_error, expand_pattern, human_size,
-                         is_http_url)
+                         is_http_url, open_path)
 
 
 def is_download_url(u):
@@ -862,7 +863,12 @@ class SettingsDialog(QDialog):
         g.addWidget(self.remote_port, 1, 0)
         lay.addLayout(g)
         self.token = s["remote_token"] or remote.new_token()
-        qrow = QHBoxLayout()
+        self.remote_status = QLabel()
+        self.remote_status.setWordWrap(True)
+        lay.addWidget(self.remote_status)
+        self.remote_box = QWidget()
+        qrow = QHBoxLayout(self.remote_box)
+        qrow.setContentsMargins(0, 0, 0, 0)
         self.qr = QLabel()
         self.qr.setFixedSize(180, 180)
         qrow.addWidget(self.qr)
@@ -889,8 +895,8 @@ class SettingsDialog(QDialog):
                             "PyDM — make a new one if it leaks. Use only on Wi-Fi you trust."))
         qcol.addStretch()
         qrow.addLayout(qcol, 1)
-        lay.addLayout(qrow)
-        for w in (self.remote_lan, self.remote_port):
+        lay.addWidget(self.remote_box)
+        for w in (self.remote_on, self.remote_lan, self.remote_port):
             (w.toggled if hasattr(w, "toggled") else w.valueChanged).connect(self._refresh_qr)
         self._refresh_qr()
         lay.addSpacing(8)
@@ -915,6 +921,40 @@ class SettingsDialog(QDialog):
         lay.addLayout(trow)
         lay.addWidget(hint("Install “ntfy” on your phone and subscribe to the topic above. The "
                            "topic name is your secret — keep it private."))
+        lay.addSpacing(10)
+        self.share_on = self._toggle(lay, "Send links from my phone to PyDM — works anywhere, "
+                                          "not just on Wi-Fi", s["share_enabled"])
+        self.share_topic = s["share_topic"] or inbox.new_topic()
+        srow = QHBoxLayout()
+        self.share_qr = QLabel()
+        self.share_qr.setFixedSize(150, 150)
+        srow.addWidget(self.share_qr)
+        scol = QVBoxLayout()
+        scol.addWidget(field_label("YOUR PRIVATE INBOX TOPIC"))
+        self.share_edit = QLineEdit(self.share_topic)
+        self.share_edit.setReadOnly(True)
+        scol.addWidget(self.share_edit)
+        sb = QHBoxLayout()
+        scp = button("Copy", None, "copy")
+        scp.clicked.connect(lambda: QApplication.clipboard().setText(self.share_edit.text()))
+        snew = button("New topic", "Ghost", "refresh", C["muted"])
+        snew.clicked.connect(self._new_share_topic)
+        sb.addWidget(scp)
+        sb.addWidget(snew)
+        sb.addStretch()
+        scol.addLayout(sb)
+        scol.addWidget(hint("1. In the ntfy app tap + and subscribe to this topic (or scan the "
+                            "code).  2. In YouTube, Chrome or any app: Share → ntfy → this "
+                            "topic. PyDM starts the download and tells you. Video pages get "
+                            "the best quality up to 1080p."))
+        scol.addStretch()
+        srow.addLayout(scol, 1)
+        self.share_box = QWidget()
+        self.share_box.setLayout(srow)
+        lay.addWidget(self.share_box)
+        self.share_on.toggled.connect(self._refresh_share)
+        self.ntfy_server.textChanged.connect(self._refresh_share)
+        self._refresh_share()
         lay.addStretch()
 
         # Updates
@@ -934,12 +974,32 @@ class SettingsDialog(QDialog):
         self.upd_state = QLabel("")
         self.upd_state.setObjectName("Faint")
         self.upd_state.setWordWrap(True)
+        self.upd_now = button("Update now", None, "download")
+        self.upd_now.hide()
+        self.upd_now.clicked.connect(self._update_now)
         urow.addWidget(chk)
+        urow.addWidget(self.upd_now)
         urow.addWidget(self.upd_state, 1)
         lay.addLayout(urow)
         lay.addWidget(hint("Updates are only offered when the manifest's signature matches the "
                            "release key, and the installer must match the signed SHA-256. "
                            "Use tools/sign_release.py to publish your own builds."))
+        lay.addSpacing(16)
+        lay.addWidget(field_label("DIAGNOSTICS"))
+        drow = QHBoxLayout()
+        dcopy = button("Copy diagnostics", "Ghost", "copy", C["muted"])
+        dcopy.clicked.connect(self._copy_diag)
+        dopen = button("Open log folder", "Ghost", "folder", C["muted"])
+        dopen.clicked.connect(lambda: open_path(log_dir()))
+        self.diag_state = QLabel("")
+        self.diag_state.setObjectName("Faint")
+        drow.addWidget(dcopy)
+        drow.addWidget(dopen)
+        drow.addWidget(self.diag_state, 1)
+        lay.addLayout(drow)
+        lay.addWidget(hint("Something not working? Click Copy diagnostics and paste it into "
+                           "your message. It has the log of what servers answered — never "
+                           "your passwords, tokens or cookies."))
         lay.addStretch()
         self.nav.setCurrentRow(0)
 
@@ -1020,7 +1080,31 @@ class SettingsDialog(QDialog):
                  "end": b.time().toString("HH:mm"), "kbps": k.value(), "enabled": True}
                 for _r, d, a, b, k in self.rule_rows]
 
+    def _remote_status_text(self):
+        s = self.m.settings
+        state, why = getattr(self.parent(), "remote_state", ("off", ""))
+        changed = (self.remote_on.isChecked(), self.remote_lan.isChecked(),
+                   self.remote_port.value()) != (s["remote_enabled"], s["remote_lan"],
+                                                 s["remote_port"])
+        if not self.remote_on.isChecked():
+            return C["muted"], "Off. Turn it on, then click Save changes."
+        if changed:
+            return C["warn"], "Click Save changes to start it with these settings."
+        if state == "running":
+            fw = ("" if not self.remote_lan.isChecked() or
+                  remote.firewall_rule_ok(self.remote_port.value())
+                  else " Phones are blocked by Windows Firewall: click “Allow through "
+                       "Windows Firewall”.")
+            return (C["warn"] if fw else C["success"]), "● Running." + fw
+        if state == "error":
+            return C["danger"], f"Couldn't start: {why}. Try another port."
+        return C["muted"], "Not running."
+
     def _refresh_qr(self, *_):
+        color, text = self._remote_status_text()
+        self.remote_status.setText(text)
+        self.remote_status.setStyleSheet(f"color: {color};")
+        self.remote_box.setVisible(self.remote_on.isChecked())
         host = remote.lan_ip() if self.remote_lan.isChecked() else "127.0.0.1"
         url = f"http://{host}:{self.remote_port.value()}/#t={self.token}"
         self.remote_url.setText(url)
@@ -1034,6 +1118,18 @@ class SettingsDialog(QDialog):
         self.token = remote.new_token()
         self._refresh_qr()
 
+    def _new_share_topic(self):
+        self.share_topic = inbox.new_topic()
+        self._refresh_share()
+
+    def _refresh_share(self, *_):
+        self.share_edit.setText(self.share_topic)
+        self.share_box.setVisible(self.share_on.isChecked())
+        server = (self.ntfy_server.text().strip() or "https://ntfy.sh").rstrip("/")
+        pm = qr_pixmap(f"{server}/{self.share_topic}")
+        if pm:
+            self.share_qr.setPixmap(pm.scaled(150, 150))
+
     def _test_ntfy(self):
         ok = notify.send(self.ntfy_server.text().strip(), self.ntfy_topic.text().strip(),
                          "PyDM test", "Notifications are working ✓")
@@ -1044,12 +1140,23 @@ class SettingsDialog(QDialog):
         try:
             man = updater.check(self.upd_url.text().strip(), self.upd_key.text().strip(),
                                 self.m.opener)
+            self._man = man
             self.upd_state.setText(f"Version {man['version']} is available." if man
                                    else "You're up to date.")
+            self.upd_now.setVisible(bool(man) and hasattr(self.parent(), "start_update"))
         except updater.UpdateError as e:
             self.upd_state.setText(str(e))
         except Exception as e:  # noqa: BLE001
             self.upd_state.setText(f"Couldn't check: {describe_error(e)}")
+
+    def _update_now(self):
+        self.parent().start_update(self._man)
+        self.upd_now.hide()
+        self.upd_state.setText("Downloading… PyDM will ask to install it when it's ready.")
+
+    def _copy_diag(self):
+        QApplication.clipboard().setText(diagnostics(self.m.settings))
+        self.diag_state.setText("Copied — paste it into your message.")
 
     def _pick_file(self, edit):
         f, _ = QFileDialog.getOpenFileName(self, "Choose ffmpeg", edit.text())
@@ -1085,6 +1192,7 @@ class SettingsDialog(QDialog):
             "ntfy_enabled": self.ntfy_on.isChecked(),
             "ntfy_server": self.ntfy_server.text().strip() or "https://ntfy.sh",
             "ntfy_topic": self.ntfy_topic.text().strip(),
+            "share_enabled": self.share_on.isChecked(), "share_topic": self.share_topic,
             "check_updates": self.upd_on.isChecked(), "update_url": self.upd_url.text().strip(),
             "update_public_key": self.upd_key.text().strip(),
             "notifications": self.notify.isChecked(), "monitor_clipboard": self.clip.isChecked(),

@@ -108,6 +108,155 @@ def suite_core(t):
 
 
 # --------------------------------------------------------------------------- reliability
+def suite_preview(t):
+    """Instant preview: play while downloading; seeking fetches that part first."""
+    import urllib.request
+    from pydm.core.preview import PreviewServer, can_preview
+    m = t.manager("preview")
+    src = open(t.p("srv/f100.bin"), "rb").read()
+    d = m.add(t.url("cdn") + "f100.bin", filename="movie.mp4", connections=4, auto_tune=False)
+    t.wait_running(m, d, 1.0)
+    t.check("preview offered for a video that's downloading", can_preview(d), d.status)
+    pv = PreviewServer(m)
+    url = pv.stream_url(d)
+
+    def get(rng):
+        t0 = time.time()
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Range": rng}),
+                                    timeout=60) as r:
+            return r.status, r.read(256 * 1024), time.time() - t0
+    st, b, dt = get("bytes=0-")
+    t.check("preview: plays from the start right away", st == 206 and b == src[:len(b)] and
+            dt < 3, f"{dt:.2f}s")
+    have = d.downloaded
+    off = 90 * 1_000_000
+    st, b, dt = get(f"bytes={off}-")
+    t.check("preview: jump to 90% fetches that part first (seconds, not minutes)",
+            st == 206 and b == src[off:off + len(b)] and dt < 5 and d.preview_seeks >= 1,
+            f"{dt:.2f}s with {have / 2**20:.0f} MB downloaded, seeks={d.preview_seeks}")
+    st, b, dt = get("bytes=-65536")
+    t.check("preview: end of file (MP4 index) arrives fast too",
+            st == 206 and b == src[-65536:] and dt < 5, f"{dt:.2f}s")
+    bad = urllib.request.Request(url.replace(pv.secret, "x" * len(pv.secret)))
+    try:
+        urllib.request.urlopen(bad, timeout=5)
+        ok = False
+    except urllib.error.HTTPError as e:
+        ok = e.code == 404
+    t.check("preview: needs the per-session secret, only on 127.0.0.1",
+            ok and url.startswith("http://127.0.0.1:"))
+    t.wait(m, d, 200)
+    st, b, dt = get("bytes=1000-")
+    t.check("preview keeps working after the download completes and is renamed",
+            d.status == "Completed" and b == src[1000:1000 + len(b)], d.status)
+    pv.stop()
+
+
+def suite_phone(t):
+    """Share-to-PC: links posted to the private ntfy inbox topic become downloads."""
+    import json as _json
+    import queue as _queue
+    import threading as _th
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from pydm.core import inbox
+
+    subs, published = [], []
+
+    class Ntfy(BaseHTTPRequestHandler):           # enough of ntfy: publish + JSON stream
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            topic = self.path.strip("/")
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
+            tags = [x for x in (self.headers.get("Tags") or "").split(",") if x]
+            ev = {"id": f"m{len(published)}", "event": "message", "topic": topic,
+                  "message": body, "title": self.headers.get("Title", ""), "tags": tags}
+            published.append(ev)
+            for q in list(subs):
+                q.put(ev)
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def do_GET(self):
+            q = _queue.Queue()
+            subs.append(q)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.end_headers()
+            self.wfile.write(b'{"event":"open"}\n')
+            self.wfile.flush()
+            try:
+                while True:
+                    try:
+                        ev = q.get(timeout=1)
+                    except _queue.Empty:
+                        self.wfile.write(b'{"event":"keepalive"}\n')
+                    else:
+                        self.wfile.write(_json.dumps(ev).encode() + b"\n")
+                    self.wfile.flush()
+            except OSError:
+                subs.remove(q)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Ntfy)
+    srv.daemon_threads = True
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    server = f"http://127.0.0.1:{srv.server_address[1]}"
+    m = t.manager("phone")
+    topic = inbox.new_topic()
+    t.check("inbox topic is long and random", len(topic) >= 24 and topic != inbox.new_topic(),
+            topic)
+    ib = inbox.Inbox(m, server, topic)
+    ib.start()
+    t0 = time.time()
+    while ib.state != "listening" and time.time() - t0 < 10:
+        time.sleep(0.05)
+
+    def share(text):
+        import urllib.request
+        urllib.request.urlopen(urllib.request.Request(f"{server}/{topic}", data=text.encode(),
+                                                      method="POST"), timeout=5).read()
+    url = t.url("core") + "small.pdf"
+    share(f"Check this out {url} thanks!")         # how share sheets send text + link
+    t0 = time.time()
+    d = None
+    while time.time() - t0 < 15 and d is None:
+        d = m.find_url(url)
+        time.sleep(0.1)
+    t.check("link shared from the phone starts a download on the PC", d is not None and
+            d.source == "phone", d and d.status)
+    if d:
+        t.wait(m, d, 60)
+        t.check("shared download completes intact", d.status == "Completed" and
+                md5(d.path) == md5(t.p("srv/small.pdf")), d.status)
+    time.sleep(1)
+    acks = [e for e in published if inbox.ACK_TAG in e["tags"]]
+    t.check("phone gets a confirmation, and PyDM ignores its own confirmations",
+            len(acks) == 1 and len(m.downloads) == 1, f"{len(acks)} acks, {len(m.downloads)} downloads")
+    share(f"again {url}")
+    time.sleep(2)
+    t.check("the same link twice doesn't download twice", len(m.downloads) == 1,
+            f"{len(m.downloads)} downloads")
+    share("just some text, no link")
+    time.sleep(1.5)
+    t.check("a message without a link is answered, not downloaded",
+            len(m.downloads) == 1 and any("no link" in e["title"] for e in published))
+    t.check("inbox remembers where it was (no repeats after restart)",
+            m.settings.get("share_since") == ib.since and ib.since)
+    try:
+        inbox.Inbox(m, "http://ntfy.example.com", topic).start()
+        plain = True
+    except ValueError:
+        plain = False
+    t.check("inbox refuses plain-http ntfy servers on the internet", not plain)
+    ib.stop()
+    srv.shutdown()
+
+
 def suite_reliability(t):
     # every connection goes silent mid-transfer (socket stays open): the watchdog must
     # reconnect long before the 60 s socket timeout configured here
@@ -129,6 +278,16 @@ def suite_reliability(t):
             h2.status == "Completed" and h2.conn_restarts >= 2 and el < 20 and
             md5(h2.path) == md5(t.p("srv/f100.bin")),
             f"{h2.status} in {el:.0f}s, {h2.conn_restarts} connections replaced")
+    h3 = hm.add(t.url("solo") + "f100.bin", filename="solo.bin", connections=4,
+                auto_tune=True)
+    t0 = time.time()
+    t.wait(hm, h3, 150)
+    el = time.time() - t0
+    t.check("server punishes parallel connections: backs off to 1 and finishes",
+            h3.status == "Completed" and h3.backoff and h3.target == 1 and el < 80 and
+            md5(h3.path) == md5(t.p("srv/f100.bin")),
+            f"{h3.status} in {el:.0f}s, backoff={h3.backoff}, target={h3.target}, "
+            f"stalls={h3.stalls}, tuning={h3.tuning}")
     from pydm.core.util import human_time
     t.check("time left never shows nonsense while stalled",
             human_time(3e13) == "" and human_time(float("nan")) == "")
@@ -429,6 +588,27 @@ def suite_media(t):
     t.wait(m, d)
     pr = t.probe(d.path) if d.status == "Completed" else None
     t.check("yt-dlp: video on a web page", pr and pr[0] == 30, d.error)
+    # only part of a video: 5 s → 9 s, fast (keyframe) and exact cuts
+    for exact in (False, True):
+        c = m.add_clip(V + "movie720.mp4", "clip", 5, 9, exact=exact)
+        t.wait(m, c, 120)
+        dur = None
+        if c.status == "Completed" and t.ffprobe:
+            import subprocess as _sp
+            out = _sp.run([t.ffprobe, "-v", "error", "-show_entries", "format=duration",
+                           "-of", "csv=p=0", c.path], capture_output=True, text=True).stdout
+            dur = float(out.strip() or 0)
+        tol = 0.35 if exact else 2.5
+        t.check(f"only part of a video ({'exact' if exact else 'fast'} cut): 5s→9s",
+                dur is not None and abs(dur - 4) <= tol and "[0m05s-0m09s]" in c.filename,
+                f"{c.status} {c.filename} duration={dur} {c.error or ''}")
+    try:
+        media.check_clip(media.parse_time("2:00"), media.parse_time("1:00"))
+        bad = False
+    except media.MediaError:
+        bad = True
+    t.check("clip times: 12:30 / 1:02:03 / 90 understood, end-before-start refused",
+            bad and media.parse_time("1:02:03") == 3723 and media.parse_time("12:30") == 750)
     info = media.resolve(V + "master/master.m3u8")
     opts = media.choices(info)
     t.check("yt-dlp: stream qualities listed", [o["label"] for o in opts][:2] == ["720p", "360p"],
@@ -759,6 +939,7 @@ def suite_extension(t):
 
 
 SUITES = [("core", suite_core), ("reliability", suite_reliability),
+          ("preview", suite_preview), ("phone", suite_phone),
           ("features", suite_features), ("hls", suite_hls), ("media", suite_media),
           ("windows", suite_windows), ("extension", suite_extension), ("gui", suite_gui),
           ("speed", suite_speed), ("package", suite_package)]

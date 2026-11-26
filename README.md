@@ -1,4 +1,4 @@
-# PyDM 4.2 — high-speed, secure download manager
+# PyDM 4.3 — high-speed, secure download manager
 
 A download manager in the spirit of Internet Download Manager. It's built for raw speed and adds what IDM lacks:
 
@@ -68,6 +68,21 @@ How v3 gets there:
 - **Fast data path.** Data is read straight into preallocated buffers and written with positional writes (`pwrite`). Sockets use 4 MB receive buffers.
 - **Windows file allocation.** Files are created as NTFS sparse files, so jumping ahead in a big file never stalls on zero-filling.
 - **Connection budget.** A global limit (128 by default) keeps many simultaneous downloads from overwhelming your router.
+
+## New in 4.3
+- **Instant preview.** Watch or listen while a file downloads. Jump anywhere and PyDM fetches that
+  part first (about 0.4 s in tests, even when only 3 MB of 100 MB were downloaded). Plays in your
+  browser, or in VLC for formats browsers can't play.
+- **Send links from your phone, from anywhere.** In any app tap Share → ntfy → your private inbox
+  topic, and your PC starts the download and confirms back. Video pages get the best quality up
+  to 1080p. No port forwarding or Wi-Fi needed.
+- **Download only part of a video.** "From 12:30 to 15:00" in the video window, or
+  `--from 12:30 --to 15:00` on the command line. Only that part is downloaded. Exact cut is optional.
+- **Tougher with bad servers.** Silent connections are replaced in ~2 s. If a server keeps going
+  quiet with several connections, PyDM continues with one, like a browser.
+- **Diagnostics.** A log of what servers answered (secrets redacted), plus Settings → Updates →
+  Copy diagnostics.
+- Settings shows whether the phone remote is running, and has an **Update now** button.
 
 ## New in v4
 **Browser extension (Chrome, Edge, Brave; Firefox: rename `manifest.firefox.json` → `manifest.json`)**

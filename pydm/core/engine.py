@@ -35,9 +35,10 @@ import uuid
 
 from . import checksums, ftp, media, postprocess, security
 from .bandwidth import Governor
+from .log import log, safe_url
 from .util import (APP_DIR, DEFAULT_UA, content_disposition_filename, SETTINGS_FILE, STATE_FILE, TEMP_SUFFIX, category_for,
                    describe_error, ext_of, filename_from_url, is_inside, safe_filename,
-                   unique_path)
+                   human_size, unique_path)
 
 CHUNK_SIZE = 256 * 1024
 MIN_SPLIT = 512 * 1024
@@ -46,7 +47,10 @@ RCVBUF = 4 * 1024 * 1024
 HARD_MAX_CONNECTIONS = 64
 AUTO_START = 8
 TUNE_INTERVAL = 1.5
-STALL_SECONDS = 10            # no bytes on any connection this long: reconnect them all
+STALL_SECONDS = 10            # (almost) no bytes this long: reconnect them all
+PREVIEW_EXTRA = 2             # connections the preview player may add (seek + MP4 index)
+PREVIEW_NEAR = 4 * 2**20      # player wants data this close to a connection: let it arrive
+STALL_MIN_BYTES = 64 * 1024   # less than this in STALL_SECONDS counts as stalled (trickling)
 RUNNING_STATES = ("Connecting", "Downloading", "Verifying", "Extracting", "Merging")
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
 _SECRET_HEADERS = {"authorization", "cookie", "proxy-authorization"}
@@ -105,6 +109,10 @@ DEFAULT_SETTINGS = {
     "ntfy_enabled": False,
     "ntfy_server": "https://ntfy.sh",
     "ntfy_topic": "",
+    "share_enabled": False,          # receive links shared from the phone (ntfy inbox topic)
+    "share_topic": "",
+    "share_since": "",
+    "phone_video_height": 1080,
     "check_updates": True,
     "update_url": "",
     "update_public_key": "",
@@ -632,6 +640,10 @@ class Download:
         self.conn_restarts = 0
         self.tuning = ""
         self.stalls = 0
+        self.backoff = False
+        self._wd = None
+        self._hot = None                    # segment the preview player is waiting for
+        self.preview_seeks = 0
         self.writer = None
         self.err_transient = False
         self._refreshed_url = False
@@ -902,6 +914,7 @@ class Download:
         self._abort = None
         self.err_transient = False
         started = self._run_started = time.monotonic()
+        log.info("start %s [%s] %s", self.filename, self.kind, safe_url(self.url))
         try:
             if self.kind == "media":
                 if self._run_media():
@@ -948,6 +961,18 @@ class Download:
             self.speed = 0.0
             with self.lock:
                 self.workers = []
+            took = time.monotonic() - started
+            if self.status == "Completed":
+                log.info("done %s: %s in %.0fs (%s/s avg), %d conn restarts, %d stalls",
+                         self.filename, human_size(self.downloaded), took,
+                         human_size(self.downloaded / took if took else 0),
+                         getattr(self, "conn_restarts", 0), self.stalls)
+            elif self.status == "Error":
+                log.error("failed %s after %.0fs: %s%s", self.filename, took, self.error,
+                          " (will retry)" if self.retry_at else "")
+            else:
+                log.info("%s %s at %s", self.status.lower(), self.filename,
+                         human_size(self.downloaded))
             self._save()
 
     def _refresh_media_url(self):
@@ -1341,10 +1366,53 @@ class Download:
         self.segments.sort(key=lambda s: s.start)
         return new
 
-    def _claim(self, w):
+    # ------------------------------------------------------------------ instant preview
+    def available_from(self, off):
+        """How many bytes from `off` are already on disk, contiguously."""
+        if self.status == "Completed":
+            return max(0, (self.total or 0) - off)
+        with self.lock:
+            for seg in self.segments:
+                if seg.start <= off < seg.pos:
+                    return seg.pos - off
+        return 0
+
+    def prioritize(self, off):
+        """A player wants the bytes at `off` (it seeked, or needs the MP4 index at the end):
+        start fetching there now instead of waiting for the piece's connection to arrive."""
+        if not self.resumable or not self.total or self.status == "Completed":
+            return
         with self.lock:
             seg = next((s for s in self.segments
-                        if not s.active and not s.failed and s.remaining() > 0), None)
+                        if s.end is not None and s.start <= off <= s.end), None)
+            if seg is None or seg.pos > off or seg.failed:
+                return
+            if off - seg.pos < PREVIEW_NEAR:          # its connection gets there in a moment
+                if not seg.active:
+                    self._hot = seg
+                return
+            if self._hot is not None and not self._hot.active and \
+                    self._hot.start <= off < self._hot.start + PREVIEW_NEAR:
+                return                                 # already queued for this spot
+            new = Segment(off, seg.end)
+            seg.end = off - 1                          # its owner stops at the cut (as in stealing)
+            self.segments.append(new)
+            self.segments.sort(key=lambda s: s.start)
+            self._hot = new
+            self.preview_seeks += 1
+
+    def _hot_waiting(self):
+        h = self._hot
+        return h is not None and not h.active and not h.failed and h.remaining() > 0
+
+    def _claim(self, w):
+        with self.lock:
+            seg = None
+            if self._hot_waiting():                    # the preview player is waiting for this
+                seg, self._hot = self._hot, None
+            if seg is None:
+                seg = next((s for s in self.segments
+                            if not s.active and not s.failed and s.remaining() > 0), None)
             if seg is None and not self.sequential:
                 seg = self._split_largest()
             if seg is not None:
@@ -1372,6 +1440,8 @@ class Download:
             self.workers = []
         self.target = self._initial_target()
         self.conn_restarts = 0
+        self._wd = None
+        self.backoff = False                    # server punishes many connections: stay at 1
         self._tune = {"t": time.monotonic(), "base": None, "prev": None, "done": False,
                       "done_at": 0}
         self.tuning = "tuning" if self.auto_tune else "fixed"
@@ -1386,6 +1456,10 @@ class Download:
             slots = self.target - alive
             if self.manager:
                 slots = min(slots, self.manager.connection_budget())
+            with self.lock:
+                if self._hot_waiting() and not self.backoff and slots <= 0 and \
+                        alive < max(self._cap(), self.target) + PREVIEW_EXTRA:
+                    slots = 1                          # extra connection for the player
             for _ in range(max(0, slots) if work else 0):
                 src = self._pick_source()
                 if src is None:
@@ -1419,7 +1493,7 @@ class Download:
     def _autotune(self):
         """Double the connection count while throughput keeps scaling; settle when it stops."""
         t = self._tune
-        if not self.auto_tune or self._limited():
+        if not self.auto_tune or self._limited() or self.backoff:
             return
         now = time.monotonic()
         if t["done"]:
@@ -1471,6 +1545,8 @@ class Download:
         """Server refused more connections (429/503): back off and remember the limit."""
         with self.lock:
             alive = sum(1 for x in self.workers if x.alive)
+        log.warning("%s: server refused extra connections; limiting to %d", self.filename,
+                    max(1, alive - 1))
         self.target = max(1, min(self.target, alive - 1))
         self._tune.update(done=True, done_at=time.monotonic())
         self.tuning = "server limit"
@@ -1480,30 +1556,44 @@ class Download:
             self.manager.update_settings({"host_limits": limits})
 
     def _watchdog(self, now):
-        """Every connection silent: reconnect them all instead of waiting out the socket timeout.
+        """Download (nearly) silent: reconnect, and if it keeps happening, back off to one
+        connection for the rest of this run.
 
-        Some servers and ISPs (or a Wi-Fi drop) leave TCP connections open but send nothing.
-        After STALL_SECONDS with no bytes at all, cut every connection and redial. If that keeps
-        happening, the server is probably punishing many connections: halve them."""
-        wd = self.__dict__.setdefault("_wd", {"bytes": self.downloaded, "t": now, "kicks": 0})
-        if self.downloaded != wd["bytes"]:
+        Some servers and ISPs keep TCP connections open but stop sending, or trickle a few
+        bytes to keep them alive. Over STALL_SECONDS with under STALL_MIN_BYTES received:
+        the first time, cut every connection and redial; the second time, the server is
+        punishing parallel connections, so drop to one (what a browser would do) and stop
+        auto-tuning. A burst of real progress later clears the count."""
+        wd = self._wd
+        if wd is None:
+            wd = self._wd = {"bytes": self.downloaded, "t": now, "kicks": 0, "kick_bytes": 0}
+        gained = self.downloaded - wd["bytes"]
+        if gained >= STALL_MIN_BYTES:
             wd.update(bytes=self.downloaded, t=now)
-            if now - wd.get("kick_t", 0) > 60:
-                wd["kicks"] = 0
+            if wd["kicks"] and self.downloaded - wd["kick_bytes"] > 32 * 2**20:
+                wd["kicks"] = 0                  # healthy again for 32 MB: forget the stalls
             return
         if now - wd["t"] < STALL_SECONDS:
             return
         with self.lock:
             ws = [w for w in self.workers if w.alive and w.seg and not w.retire]
+        wd.update(bytes=self.downloaded, t=now)
         if not ws:
             return
         wd["kicks"] += 1
-        wd.update(t=now, kick_t=now)
+        wd["kick_bytes"] = self.downloaded
         self.stalls += 1
-        if wd["kicks"] >= 2 and self.target > 1:
-            self.target = max(1, self.target // 2)
+        if wd["kicks"] >= 2 and not self.backoff:
+            self.backoff = True
+            self.target = 1
             self._tune.update(done=True, done_at=now)
-            self.tuning = "stalled"
+            self.tuning = "backoff"
+            self._retire_extra()
+            log.warning("%s: stalled again — server seems to punish parallel connections; "
+                        "continuing with 1 connection", self.filename)
+        else:
+            log.warning("%s: no data for %ss on %d connection(s) — reconnecting",
+                        self.filename, STALL_SECONDS, len(ws))
         for w in ws:
             w.restart = True
             if w.conn is not None and hasattr(w.conn, "abort"):
@@ -1536,6 +1626,8 @@ class Download:
                         cut.append(w)
                 else:
                     w.slow_for = 0
+        if cut:
+            log.info("%s: replaced %d slow/silent connection(s)", self.filename, len(cut))
         for w in cut:                               # a silent read never returns by itself
             if w.conn is not None and hasattr(w.conn, "abort"):
                 w.conn.abort()
@@ -1592,6 +1684,8 @@ class Download:
 
     def _on_error(self, w, seg, e, attempts):
         code = getattr(e, "code", None)
+        log.info("%s conn#%s: %s (attempt %d)", self.filename, getattr(w, "id", "?"),
+                 f"HTTP {code}" if code else describe_error(e), attempts + 1)
         if disk_full(e):
             self._abort = "Disk is full — free some space, then resume"
             return "abort"
@@ -1880,6 +1974,30 @@ class Manager:
         parent.status = "Queued" if start else "Paused"
         self.save()
         return parent
+
+    def add_clip(self, url, title, start, end, fmt=None, height=None, container="mp4",
+                 mp3=False, exact=False, save_dir=None, referrer=None, cookies=None,
+                 start_now=True, source="manual"):
+        """Download only start..end seconds of a video (page URL or direct/HLS link).
+        yt-dlp fetches just that part; exact=True re-encodes so the cut is frame-accurate."""
+        if not media.ffmpeg_path(self.settings):
+            raise media.MediaError("Downloading part of a video needs ffmpeg")
+        if fmt is None:
+            fmt = (f"bv*[height<={height}]+ba/b[height<={height}]/bv*+ba/b" if height
+                   else "bv*+ba/b")
+        cont = "mp3" if mp3 else container
+        label = f"{media.fmt_clock(start)}–{media.fmt_clock(end)}"
+        def tag(x):                              # file names can't contain ":"
+            h, rem = divmod(int(round(x)), 3600)
+            mi, se = divmod(rem, 60)
+            return f"{h}h{mi:02d}m{se:02d}s" if h else f"{mi}m{se:02d}s"
+        name = media.title_filename(f"{title} [{tag(start)}-{tag(end)}]", cont)
+        return self.add(url, filename=name, kind="ytdlp", save_dir=save_dir, referrer=referrer,
+                        cookies=cookies, start=start_now, source=source,
+                        media={"page_url": url, "title": title, "format": fmt,
+                               "container": cont, "op": "mp3" if mp3 else None,
+                               "clip": [float(start), float(end)], "exact": bool(exact),
+                               "label": f"Part {label}", "height": height})
 
     def inspect_stream(self, url, headers=None, referrer=None, cookies=None):
         """Read an HLS master playlist: returns list of quality options for add_stream."""
