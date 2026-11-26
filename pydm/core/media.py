@@ -320,10 +320,8 @@ def run_ytdlp(d):
         done = st.get("downloaded_bytes") or 0
         total = st.get("total_bytes") or st.get("total_bytes_estimate")
         with d.lock:
-            got = max(0, done - getattr(d, "_ytdl_last", 0))
-            d._window += got
+            d._window += max(0, done - getattr(d, "_ytdl_last", 0))
             d._ytdl_last = done
-        d._count(got)
         d.bytes_done = done
         if total:
             d.total = int(total)

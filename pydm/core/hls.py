@@ -245,7 +245,6 @@ def run(d, finalize_container=True):
                                 w.window += n
                                 host_src.bytes += n
                                 d.bytes_done += n
-                            d._count(n)
                             if d._halted():
                                 conn.close()
                                 with lock:

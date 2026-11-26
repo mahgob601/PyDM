@@ -639,7 +639,6 @@ class BatchDialog(Dialog):
 # --------------------------------------------------------------------------- settings
 class SettingsDialog(QDialog):
     PAGES = [("General", "grid"), ("Speed", "zap"), ("Bandwidth", "gauge"),
-             ("Internet quota", "pie"),
              ("Network", "globe"), ("Automation", "refresh"), ("Security", "shield"),
              ("Video", "film"), ("Scheduler", "calendar"), ("Browser", "link"),
              ("Remote & phone", "activity"), ("Updates", "download")]
@@ -765,69 +764,6 @@ class SettingsDialog(QDialog):
         lay.addWidget(self.quiet_kbps, 0, Qt.AlignLeft)
         if not sys.platform.startswith("win"):
             lay.addWidget(hint("Full-screen detection works on Windows."))
-        lay.addStretch()
-
-        # Internet quota
-        p, lay = self._page("Internet quota", "For plans with a monthly limit (WE, Vodafone, "
-                                              "Orange…): PyDM watches it for you.")
-        from ..core import quota as qmod
-        self.q_on = self._toggle(lay, "Watch my internet quota", s["quota_enabled"])
-        g = QGridLayout()
-        g.setHorizontalSpacing(12)
-        g.addWidget(field_label("MONTHLY QUOTA (GB)"), 0, 0)
-        g.addWidget(field_label("RENEWS ON DAY"), 0, 1)
-        g.addWidget(field_label("PAUSE DOWNLOADS AT"), 0, 2)
-        self.q_gb = QDoubleSpinBox()
-        self.q_gb.setRange(1, 100000)
-        self.q_gb.setDecimals(0)
-        self.q_gb.setButtonSymbols(QDoubleSpinBox.NoButtons)
-        self.q_gb.setValue(float(s["quota_gb"]))
-        self.q_day = self._spin(1, 31, s["quota_renew_day"])
-        self.q_stop = self._spin(50, 100, s["quota_stop_percent"])
-        self.q_stop.setSuffix(" %")
-        g.addWidget(self.q_gb, 1, 0)
-        g.addWidget(self.q_day, 1, 1)
-        g.addWidget(self.q_stop, 1, 2)
-        lay.addLayout(g)
-        lay.addWidget(field_label("WHAT COUNTS"))
-        self.q_mode = QComboBox()
-        self.q_mode.addItem("Everything this PC uses (closest to what your ISP counts)", "pc")
-        self.q_mode.addItem("Only PyDM's downloads", "pydm")
-        self.q_mode.setCurrentIndex(0 if s["quota_mode"] == "pc" and qmod.psutil else 1)
-        if not qmod.psutil:
-            self.q_mode.model().item(0).setEnabled(False)
-        lay.addWidget(self.q_mode)
-        lay.addWidget(hint("Your ISP also counts phones and TVs at home, so set what you've "
-                           "already used from their app (click the quota card in the sidebar → "
-                           "Set how much I've used). PyDM warns at 80% and pauses its downloads "
-                           "at the level above — you can always continue anyway."))
-        lay.addSpacing(6)
-        lay.addWidget(field_label("FREE HOURS (OPTIONAL)"))
-        fr = QHBoxLayout()
-        self.q_free = QCheckBox("My plan doesn't count usage from")
-        self.q_free.setObjectName("Box")
-        self.q_free.setChecked(bool(s["quota_free_start"]))
-        self.q_f1 = QTimeEdit(QTime.fromString(s["quota_free_start"] or "02:00", "HH:mm"))
-        self.q_f2 = QTimeEdit(QTime.fromString(s["quota_free_end"] or "08:00", "HH:mm"))
-        for w in (self.q_f1, self.q_f2):
-            w.setDisplayFormat("HH:mm")
-        fr.addWidget(self.q_free)
-        fr.addWidget(self.q_f1)
-        fr.addWidget(QLabel("to"))
-        fr.addWidget(self.q_f2)
-        fr.addStretch()
-        lay.addLayout(fr)
-        br = QHBoxLayout()
-        self.q_big = QCheckBox("Hold downloads bigger than")
-        self.q_big.setObjectName("Box")
-        self.q_big.setChecked(bool(s["quota_big_wait"]))
-        self.q_big_mb = self._spin(10, 1_000_000, s["quota_big_mb"], 100)
-        self.q_big_mb.setSuffix(" MB")
-        br.addWidget(self.q_big)
-        br.addWidget(self.q_big_mb)
-        br.addWidget(QLabel("for the free hours"))
-        br.addStretch()
-        lay.addLayout(br)
         lay.addStretch()
 
         # Network
@@ -1334,15 +1270,6 @@ class SettingsDialog(QDialog):
             "ntfy_server": self.ntfy_server.text().strip() or "https://ntfy.sh",
             "ntfy_topic": self.ntfy_topic.text().strip(),
             "share_enabled": self.share_on.isChecked(), "share_topic": self.share_topic,
-            "quota_enabled": self.q_on.isChecked(), "quota_gb": self.q_gb.value(),
-            "quota_renew_day": self.q_day.value(), "quota_stop_percent": self.q_stop.value(),
-            "quota_mode": self.q_mode.currentData(),
-            "quota_free_start": self.q_f1.time().toString("HH:mm") if self.q_free.isChecked()
-            else "",
-            "quota_free_end": self.q_f2.time().toString("HH:mm") if self.q_free.isChecked()
-            else "",
-            "quota_big_wait": self.q_big.isChecked() and self.q_free.isChecked(),
-            "quota_big_mb": self.q_big_mb.value(),
             "check_updates": self.upd_on.isChecked(), "update_url": self.upd_url.text().strip(),
             "update_public_key": self.upd_key.text().strip(),
             "notifications": self.notify.isChecked(), "monitor_clipboard": self.clip.isChecked(),

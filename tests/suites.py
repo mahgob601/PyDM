@@ -301,83 +301,6 @@ def suite_phone(t):
     rs.stop()
 
 
-def suite_quota(t):
-    """Internet quota guardian: warn, hold near the limit, continue on request, free hours."""
-    import datetime as _dt
-    from pydm.core import quota as Q
-    D = _dt.datetime
-    t.check("quota cycle: renewal day in this month or the last",
-            Q.cycle_start(25, D(2026, 3, 10)) == D(2026, 2, 25) and
-            Q.cycle_start(5, D(2026, 3, 10)) == D(2026, 3, 5) and
-            Q.cycle_start(31, D(2026, 2, 28, 12)) == D(2026, 2, 28) and
-            Q.next_renewal(31, D(2026, 1, 31, 9)) == D(2026, 2, 28))
-    t.check("free hours window, including past midnight",
-            Q.in_window("02:00", "08:00", D(2026, 1, 1, 3)) and
-            not Q.in_window("02:00", "08:00", D(2026, 1, 1, 9)) and
-            Q.in_window("23:00", "06:00", D(2026, 1, 1, 1)) and
-            not Q.in_window("", "", D(2026, 1, 1, 1)))
-    m = t.manager("quota", quota_enabled=True, quota_gb=0.05, quota_mode="pydm",
-                  quota_stop_percent=95, quota_renew_day=1)
-    m.quota = Q.Quota(m, os.path.join(t.dir("quota_state"), "quota.json"))
-    d = m.add(t.url("cdn") + "f100.bin", filename="big.bin", connections=4, auto_tune=False)
-    t0 = time.time()
-    seen = []
-    while time.time() - t0 < 60:
-        m.schedule()
-        while not m.events.empty():
-            k, payload = m.events.get_nowait()
-            if k == "quota":
-                seen.append(payload[0])
-        if m.quota.held() and not d.is_running():
-            break
-        time.sleep(0.1)
-    used = m.quota.used()
-    t.check("quota: warns at 80% and pauses downloads at the stop level",
-            "caution" in seen and "danger" in seen and m.quota.held() and
-            d.status == "Paused" and 0.95 * 50e6 <= used < 0.95 * 50e6 + 12e6,
-            f"events={seen} status={d.status} used={used / 1e6:.1f} MB")
-    m.schedule()
-    time.sleep(1)
-    t.check("quota: held downloads stay paused", d.status == "Paused" and not d.is_running())
-    m.quota.allow_anyway()
-    t.wait(m, d, 120)
-    t.check("quota: 'continue anyway' resumes and finishes the file intact",
-            d.status == "Completed" and md5(d.path) == md5(t.p("srv/f100.bin")), d.status)
-    m.quota.set_used(10)
-    t.check("quota: 'I've used 10 GB' correction matches the ISP's number",
-            abs(m.quota.used() - 10e9) < 1e6, f"{m.quota.used() / 1e9:.3f} GB")
-    n = m.quota.numbers()
-    t.check("quota: daily budget and days left are computed",
-            n["days_left"] > 0 and n["per_day"] >= 0 and n["limit"] == 50e6, str(
-                {k: n[k] for k in ("days_left", "per_day")}))
-    # big downloads wait for the free hours
-    now = D.now()
-    far = (now + _dt.timedelta(hours=3)).strftime("%H:%M")
-    farther = (now + _dt.timedelta(hours=4)).strftime("%H:%M")
-    m.update_settings({"quota_gb": 1000, "quota_free_start": far, "quota_free_end": farther,
-                       "quota_big_wait": True, "quota_big_mb": 50})
-    m.quota.state["override"] = False
-    big = m.add(t.url("core") + "f100.bin", filename="later.bin")
-    small = m.add(t.url("core") + "small.pdf", filename="now.pdf")
-    t0 = time.time()
-    while time.time() - t0 < 20 and small.status != "Completed":
-        m.schedule()
-        time.sleep(0.1)
-    m.schedule()
-    t0 = time.time()
-    while time.time() - t0 < 10 and (big.is_running() or not getattr(big, "waits_free", 0)):
-        m.schedule()
-        time.sleep(0.1)
-    t.check("quota: big downloads wait for the free hours, small ones go now",
-            small.status == "Completed" and big.waits_free and not big.is_running() and
-            big.downloaded < 50 * 2**20, f"small={small.status} big={big.status} "
-            f"{big.downloaded / 2**20:.0f} MB")
-    m.update_settings({"quota_free_start": now.strftime("%H:%M"), "quota_free_end": farther})
-    t.wait(m, big, 120)
-    t.check("quota: ...and start by themselves when the free hours begin",
-            big.status == "Completed" and not big.waits_free, big.status)
-
-
 def suite_reliability(t):
     # every connection goes silent mid-transfer (socket stays open): the watchdog must
     # reconnect long before the 60 s socket timeout configured here
@@ -1061,7 +984,6 @@ def suite_extension(t):
 
 SUITES = [("core", suite_core), ("reliability", suite_reliability),
           ("preview", suite_preview), ("phone", suite_phone),
-          ("quota", suite_quota),
           ("features", suite_features), ("hls", suite_hls), ("media", suite_media),
           ("windows", suite_windows), ("extension", suite_extension), ("gui", suite_gui),
           ("speed", suite_speed), ("package", suite_package)]

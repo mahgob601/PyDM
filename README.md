@@ -70,10 +70,6 @@ How v3 gets there:
 - **Connection budget.** A global limit (128 by default) keeps many simultaneous downloads from overwhelming your router.
 
 ## New in 4.4
-- **Internet quota guardian.** Set your monthly quota and renewal day (WE, Vodafone, Orange…).
-  PyDM counts this PC's usage (or only its own downloads), shows a daily budget and when you'd run
-  out at this pace, warns at 80%, and pauses downloads at 95%. "Continue anyway" is always one
-  click away. Optional free hours: usage isn't counted, and big downloads can wait for them.
 - **Send to phone.** Any finished file gets a QR code. Scan it and the file downloads straight to
   your phone over Wi-Fi: no app, no cloud, no mobile data. The link is signed, works for 24 hours
   and covers only that file. The phone remote also has **Save to phone** buttons.

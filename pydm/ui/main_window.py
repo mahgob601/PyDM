@@ -655,36 +655,6 @@ class MainWindow(QMainWindow):
         card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         lay.addSpacing(8)
         lay.addWidget(card)
-        # internet quota (shown when the guardian is on)
-        self.q_card = QFrame()
-        self.q_card.setObjectName("SideCard")
-        self.q_card.setCursor(Qt.PointingHandCursor)
-        self.q_card.mousePressEvent = lambda e: self._quota_menu()
-        ql = QVBoxLayout(self.q_card)
-        ql.setContentsMargins(14, 10, 14, 10)
-        ql.setSpacing(5)
-        qtop = QHBoxLayout()
-        qcap = QLabel("QUOTA")
-        qcap.setObjectName("FieldLabel")
-        self.q_amount = QLabel("")
-        self.q_amount.setObjectName("Faint")
-        qtop.addWidget(qcap)
-        qtop.addStretch()
-        qtop.addWidget(self.q_amount)
-        ql.addLayout(qtop)
-        self.q_bar = QProgressBar()
-        self.q_bar.setRange(0, 1000)
-        self.q_bar.setTextVisible(False)
-        self.q_bar.setFixedHeight(6)
-        ql.addWidget(self.q_bar)
-        self.q_note = QLabel("")
-        self.q_note.setObjectName("Faint")
-        self.q_note.setWordWrap(True)
-        ql.addWidget(self.q_note)
-        self.q_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.q_card.hide()
-        lay.addSpacing(6)
-        lay.addWidget(self.q_card)
         lay.addSpacing(8)
         settings = NavButton("Settings", "settings", "settings")
         settings.setCheckable(False)
@@ -925,7 +895,6 @@ class MainWindow(QMainWindow):
         self.side_spark.set_values(self.global_history)
         lim = self.m.settings["speed_limit_kbps"]
         self.limit_btn.setText(f"  Limit: {lim} KB/s" if lim else "  No speed limit")
-        self._update_quota_card()
 
         queued = sum(1 for d in items if d.status == "Queued" and not d.is_running())
         self.f_stats.setText(f"↓ {human_size(total_speed)}/s     {len(running)} active · "
@@ -1027,22 +996,10 @@ class MainWindow(QMainWindow):
             elif kind == "schedule_stop":
                 self.notify("Scheduled downloads paused", "They'll continue at "
                             f"{self.m.settings['scheduler_start']}.", "info")
-            elif kind == "quota":
-                level, title, text = d
-                acts = [("Continue anyway", self.m.quota.allow_anyway),
-                        ("OK", lambda: None)] if level == "danger" else None
-                self.notify(title, text, level, acts)
-                self._phone_raw(title, text)
             elif kind == "queue_done":
                 if self.m.settings["on_queue_done"] == "quit":
                     QTimer.singleShot(3000, self.quit)
                     self.notify("Queue finished", "PyDM will quit in a moment.", "info")
-
-    def _phone_raw(self, title, text):
-        s = self.m.settings
-        if s["ntfy_enabled"] and s["ntfy_topic"]:
-            notify.send_async(s["ntfy_server"], s["ntfy_topic"], title, text, "high",
-                              "warning", self.m.opener)
 
     def _phone(self, kind, d):
         s = self.m.settings
@@ -1163,52 +1120,6 @@ class MainWindow(QMainWindow):
         self.toasts.show("Update ready", "The installer is verified. PyDM will close, update "
                                          "and start again.", "safe",
                          [("Install now", install), ("Later", lambda: None)])
-
-    def _update_quota_card(self):
-        q = self.m.quota
-        if q is None or not q.enabled():
-            self.q_card.hide()
-            return
-        from ..core.quota import GB
-        n = q.numbers()
-        self.q_card.show()
-        self.q_amount.setText(f"{n['used'] / GB:.1f} / {n['limit'] / GB:.0f} GB")
-        self.q_bar.setValue(int(min(1, n["fraction"]) * 1000))
-        col = C["danger"] if n["held"] or n["fraction"] >= 0.9 else \
-            C["warn"] if n["fraction"] >= 0.8 or n["runout"] else C["accent"]
-        self.q_bar.setStyleSheet(f"QProgressBar {{ background: {C['border']}; border: 0; "
-                                 f"border-radius: 3px; }} QProgressBar::chunk {{ background: "
-                                 f"{col}; border-radius: 3px; }}")
-        if n["held"]:
-            note = "Downloads paused to protect it. Click to continue anyway."
-        elif n["runout"]:
-            note = (f"At this pace it runs out on {n['runout']:%b %d} — "
-                    f"{n['per_day'] / GB:.1f} GB/day keeps you safe.")
-        else:
-            note = (f"{n['days_left']:.0f} days left · about {n['per_day'] / GB:.1f} GB "
-                    "a day to spare")
-        self.q_note.setText(note)
-
-    def _quota_menu(self):
-        q = self.m.quota
-        if q is None:
-            return
-        menu = QMenu(self)
-        if q.held():
-            menu.addAction("Continue downloading anyway (this month)", q.allow_anyway)
-        menu.addAction("Set how much I've used…", self._quota_set_used)
-        menu.addAction("Quota settings…", self.open_settings)
-        menu.exec(QCursor.pos())
-
-    def _quota_set_used(self):
-        from ..core.quota import GB
-        cur = self.m.quota.used() / GB
-        val, ok = QInputDialog.getDouble(
-            self, "Internet quota", "Your ISP's app shows you've used (GB):", round(cur, 1),
-            0, 100000, 1)
-        if ok:
-            self.m.quota.set_used(val)
-            self._update_quota_card()
 
     def notify(self, title, text, level="info", actions=None):
         if not self.m.settings["notifications"]:
